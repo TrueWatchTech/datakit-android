@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/scrollView"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    tools:context=".DebugMainActivity">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <Button
+            android:id="@+id/main_mock_crash_btn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Simulate Crash" />
+
+        <Button
+            android:id="@+id/main_mock_crash_native_btn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Simulate Native Crash" />
+
+        <Button
+            android:id="@+id/main_mock_ui_block_btn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Simulate UI Block" />
+
+        <Button
+            android:id="@+id/main_mock_anr_btn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Simulate ANR" />
+
+        <Button
+            android:id="@+id/main_mock_page_jump_btn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Web Test" />
+
+        <Button
+            android:id="@+id/main_mock_click_btn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Click Event" />
+
+        <Button
+            android:id="@+id/main_click_test_btn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Click Test Activity" />
+
+        <Button
+            android:id="@+id/main_handler_test_btn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Handler Test Activity" />
+
+        <Button
+            android:id="@+id/main_mock_log_btn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Log" />
+
+        <Button
+            android:id="@+id/main_mock_okhttp_btn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Test OkHttp Request Auto Add Interceptor" />
+
+        <Button
+            android:id="@+id/main_mock_okhttp_custom_content_btn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Test OkHttp Custom Content" />
+
+        <Button
+            android:id="@+id/main_view_loop_test"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Page Jump Test" />
+
+        <Button
+            android:id="@+id/main_manual_rum_btn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Custom RUM LOG" />
+
+        <Button
+            android:id="@+id/main_aop_ignore"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="AOP Ignore Example" />
+
+        <Button
+            android:id="@+id/main_start_service"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Start Service" />
+
+        <Button
+            android:id="@+id/main_flush_sync_data_btn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Manual Sync Data" />
+
+        <Button
+            android:id="@+id/main_high_load_btn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="High Load Scenario" />
+
+        <Button
+            android:id="@+id/main_lazy_init"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Lazy Initialization" />
+
+        <Button
+            android:id="@+id/main_dynamic_tags"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Dynamic Tags Setting" />
+
+        <Button
+            android:id="@+id/main_shut_down"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Shutdown SDK" />
+
+        <Button
+            android:id="@+id/main_clear_data"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Clear Cache Data" />
+
+        <Button
+            android:id="@+id/update_remote_config"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Pull Remote Config Immediately" />
+    </LinearLayout>
+
+
+</ScrollView>

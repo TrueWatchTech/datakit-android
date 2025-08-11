@@ -1,0 +1,66 @@
+package com.ft.sdk.tests;
+
+
+import static com.ft.sdk.tests.FTSdkAllTests.hasPrepare;
+
+import android.os.Looper;
+
+import androidx.test.ext.junit.runners.AndroidJUnit4;
+
+import com.ft.sdk.FTLogger;
+import com.ft.sdk.FTLoggerConfig;
+import com.ft.sdk.FTSDKConfig;
+import com.ft.sdk.FTSdk;
+import com.ft.sdk.garble.bean.DataType;
+import com.ft.sdk.garble.bean.Status;
+import com.ft.test.base.FTBaseTest;
+import com.ft.test.utils.CheckUtils;
+
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+
+import java.util.HashMap;
+
+/**
+ * Log globalContext test
+ *
+ * @author Brandon
+ */
+@RunWith(AndroidJUnit4.class)
+public class LogGlobalContextTest extends FTBaseTest {
+
+
+    @Before
+    public void setUp() throws Exception {
+        if (!hasPrepare) {
+            Looper.prepare();
+            hasPrepare = true;
+        }
+        stopSyncTask();
+        FTSdk.install(FTSDKConfig.builder(TEST_FAKE_URL).setDebug(true));
+        FTSdk.initLogWithConfig(new FTLoggerConfig()
+                .addGlobalContext(CUSTOM_KEY, CUSTOM_VALUE)
+                .setEnableCustomLog(true)
+        );
+
+        HashMap<String, Object> map = new HashMap<>();
+        map.put(DYNAMIC_CUSTOM_KEY, DYNAMIC_CUSTOM_VALUE);
+        FTSdk.appendLogGlobalContext(map);
+        FTSdk.appendLogGlobalContext(DYNAMIC_SINGLE_CUSTOM_KEY, DYNAMIC_SINGLE_CUSTOM_VALUE);
+    }
+
+    /**
+     * During log output, the data added by globalContext will be output together
+     */
+    @Test
+    public void logGlobalContextTest() throws InterruptedException {
+        FTLogger.getInstance().logBackground("test Log", Status.INFO);
+        Thread.sleep(2000);
+        Assert.assertTrue(CheckUtils.checkValueInLineProtocol(DataType.LOG,
+                new String[]{CUSTOM_KEY, CUSTOM_VALUE, DYNAMIC_CUSTOM_KEY, DYNAMIC_CUSTOM_VALUE,
+                        DYNAMIC_SINGLE_CUSTOM_KEY, DYNAMIC_SINGLE_CUSTOM_VALUE}));
+
+    }
+}
