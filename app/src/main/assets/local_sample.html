@@ -1,0 +1,65 @@
+<!doctype html>
+<html>
+<head>
+    <title>editor</title>
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0, minimal-ui, user-scalable=no">
+    <style type="text/css">
+        div {
+            width: 100%;
+        }
+
+    </style>
+</head>
+<body>
+<input type="button" value="test" onclick="test()">
+<script type="text/javascript">
+
+    var webViewCallBackMap = {} // Parameter callback dictionary
+
+    function Foo() {
+
+    }
+
+    function baseSend(params, callback) {
+        var tag = "Unique id:"+ new Date().getTime() // Callback through unique id
+
+        if(callback){
+            webViewCallBackMap[tag] = callback
+            params["_tag"] = tag
+            FTWebViewJavascriptBridge.sendEvent(JSON.stringify(params), "webViewCallBackMap")
+        }else{
+            FTWebViewJavascriptBridge.sendEvent(JSON.stringify(params))
+        } 
+
+    }
+
+    function baseAddEventListener(params, callback) {
+        var tag = "Unique id:"+ new Date().getTime() // Callback through unique id
+        webViewCallBackMap[tag] = callback
+        params["_tag"] = tag
+        FTWebViewJavascriptBridge.addEventListener(JSON.stringify(params), "webViewCallBackMap")    
+    }
+
+    Foo.prototype.sendEvent = baseSend
+    Foo.prototype.addEventListener = baseAddEventListener
+
+    var FT_JS_Bridge = new Foo()
+
+    function test() {
+
+        FT_JS_Bridge.sendEvent({})
+
+        FT_JS_Bridge.sendEvent({}, function (ret, err) {
+           console.log("sendEvent call back:" + JSON.stringify(ret) + "，" + JSON.stringify(err))
+        })
+
+        FT_JS_Bridge.addEventListener({}, function (ret, err) {
+           console.log("addEventListener call back:" + JSON.stringify(ret) + "，" + JSON.stringify(err))
+        })
+    }
+
+
+</script>
+</body>
+</html>
