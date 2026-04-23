@@ -14,7 +14,11 @@ import com.ft.sdk.garble.utils.Constants;
 import com.ft.sdk.garble.utils.DeviceUtils;
 import com.ft.sdk.garble.utils.LogUtils;
 import com.ft.sdk.garble.utils.PackageUtils;
+import com.ft.sdk.garble.utils.TBSWebViewUtils;
 import com.ft.sdk.garble.utils.Utils;
+import com.ft.sdk.sessionreplay.FTSessionReplayConfig;
+
+import org.jetbrains.annotations.NotNull;
 
 import java.util.HashMap;
 
@@ -32,22 +36,30 @@ public class FTSdk {
      */
     public static String PLUGIN_VERSION = "";
     /**
-     * Will only be assigned after integrating ft-native, 
+     * Will only be assigned after integrating ft-native,
      * directly access {@link com.ft.sdk.nativelib.BuildConfig#VERSION_NAME} to get
      */
     public static String NATIVE_VERSION = PackageUtils.isNativeLibrarySupport() ? PackageUtils.getNativeLibVersion() : "";
+
+    /**
+     * After integrating ft-session-replay, it will be assigned, directly access {@link com.ft.sdk.nativelib.BuildConfig#VERSION_NAME} to get
+     */
+    public static String SESSION_REPLAY_VERSION = PackageUtils.isSessionReplay() ? PackageUtils.getPackageSessionReplay() : "";
+
+    private final static boolean isSessionReplaySupport = !SESSION_REPLAY_VERSION.isEmpty();
     /**
      * Variable written by Plugin ASM, UUID is the same for the same compilation version
      */
     public static String PACKAGE_UUID = "";
     /**
-     * The above two variables cannot be changed arbitrarily, 
+     * The above two variables cannot be changed arbitrarily,
      * if changed please also change the corresponding values in the plugin
      */
     public static final String AGENT_VERSION = BuildConfig.FT_SDK_VERSION;// Current SDK version
     private static FTSdk mFtSdk;
     private final FTSDKConfig mFtSDKConfig;
     private FTRemoteConfigManager mRemoteConfigManager;
+    private String pendingRemoteConfigAppId;
 
     /**
      * @param ftSDKConfig
@@ -73,11 +85,15 @@ public class FTSdk {
                     String currentProcessName = Utils.getCurrentProcessName();
                     String packageName = context.getPackageName();
                     if (!TextUtils.isEmpty(packageName) && !TextUtils.equals(packageName, currentProcessName)) {
-                        LogUtils.e(TAG, "Current SDK can only run in the main process, current process is " + currentProcessName + ", if you want to run in non-main process you can set FTSDKConfig.setOnlySupportMainProcess(false)");
+                        LogUtils.e(TAG, "Current SDK can only run in the main process, " +
+                                "current process is " + currentProcessName + ", " +
+                                "if you want to run in non-main process you can set " +
+                                "FTSDKConfig.setOnlySupportMainProcess(false)");
                         return;
                     }
                 }
                 mFtSdk = new FTSdk(ftSDKConfig);
+                ftSDKConfig.isMainProcess = Utils.isMainProcess();
                 mFtSdk.initFTConfig(ftSDKConfig);
             }
         } catch (Exception e) {
@@ -127,6 +143,9 @@ public class FTSdk {
         EventConsumerThreadPool.get().shutDown();
         FTANRDetector.get().release();
         FTDBManager.release();
+        if (FTSdk.isSessionReplaySupport()) {
+            SessionReplayManager.get().stop();
+        }
         if (mFtSdk != null) {
             if (mFtSdk.mRemoteConfigManager != null) {
                 mFtSdk.mRemoteConfigManager.close();
@@ -149,7 +168,8 @@ public class FTSdk {
     private void initFTConfig(FTSDKConfig config) {
         LogUtils.setDebug(config.isDebug());
         if (config.isRemoteConfiguration()) {
-            mRemoteConfigManager = new FTRemoteConfigManager(config.getRemoteConfigMiniUpdateInterval());
+            mRemoteConfigManager = new FTRemoteConfigManager(config.getRemoteConfigMiniUpdateInterval(),
+                    config.getRemoteConfigFetchResult());
             mRemoteConfigManager.initFromLocalCache();
             mRemoteConfigManager.mergeSDKConfigFromCache(config);
         }
@@ -161,6 +181,10 @@ public class FTSdk {
         SyncTaskManager.get().init(config);
         FTTrackInner.getInstance().initBaseConfig(config);
         FTNetworkListener.get().monitor();
+        
+        // Initialize TBS WebView support
+        TBSWebViewUtils.initialize();
+        
         LogUtils.d(TAG, "initFTConfig complete:" + config);
     }
 
@@ -171,7 +195,7 @@ public class FTSdk {
 
 
     /**
-     * Actively update remote configuration, call frequency is affected by the time of 
+     * Actively update remote configuration, call frequency is affected by the time of
      * {@link FTSDKConfig#setRemoteConfigMiniUpdateInterval(int)} }
      */
     public static void updateRemoteConfig() {
@@ -183,11 +207,11 @@ public class FTSdk {
     }
 
     /**
-     * Actively update remote configuration, this method ignores 
+     * Actively update remote configuration, this method ignores
      * {@link FTSDKConfig#setRemoteConfigMiniUpdateInterval(int)} } configuration
      *
      * @param remoteConfigMiniUpdateInterval Remote configuration time interval, unit seconds [0,]
-     * @param result Return update result
+     * @param result                         Return update result
      */
     public static void updateRemoteConfig(int remoteConfigMiniUpdateInterval, FTRemoteConfigManager.FetchResult result) {
         if (checkInstallState()) {
@@ -208,7 +232,12 @@ public class FTSdk {
             config.setServiceName(get().getBaseConfig().getServiceName());
             if (get().mRemoteConfigManager != null) {
                 get().mRemoteConfigManager.mergeRUMConfigFromCache(config);
-                get().mRemoteConfigManager.initFromRemote(config.getRumAppId());
+                if (FTHttpConfigManager.get().isUrlAvailable()) {
+                    get().mRemoteConfigManager.initFromRemote(config.getRumAppId());
+                } else {
+                    get().pendingRemoteConfigAppId = config.getRumAppId();
+                    LogUtils.d(TAG, "URL not available, will init remote config later");
+                }
             }
             FTRUMConfigManager.get().initWithConfig(config);
             LogUtils.d(TAG, "initRUMWithConfig complete:" + config);
@@ -257,8 +286,25 @@ public class FTSdk {
         }
     }
 
+
     /**
-     * Bind user information, {@link Constants#KEY_RUM_IS_SIGN_IN}, after binding the field is T, 
+     * Initialize the configuration of session replay
+     *
+     * @param config
+     */
+    public static void initSessionReplayConfig(FTSessionReplayConfig config) {
+        try {
+            if (get().mRemoteConfigManager != null) {
+                get().mRemoteConfigManager.mergeSessionReplayConfigFromCache(config);
+            }
+            SessionReplay.enable(config, FTApplication.getApplication());
+        } catch (Exception e) {
+            LogUtils.e(TAG, "initSessionReplayConfig fail:\n" + LogUtils.getStackTraceString(e));
+        }
+    }
+
+    /**
+     * Bind user information, {@link Constants#KEY_RUM_IS_SIGN_IN}, after binding the field is T,
      * bind once, the field data will continue to retain data until calling
      * {@link #unbindRumUserData()}
      *
@@ -310,6 +356,10 @@ public class FTSdk {
         }
     }
 
+    public static boolean isSessionReplaySupport() {
+        return isSessionReplaySupport && SessionReplayManager.get().isReplayEnable();
+    }
+
 
     /**
      * Supplement global tags
@@ -325,22 +375,25 @@ public class FTSdk {
         String uuid = config.isEnableAccessAndroidID() ? DeviceUtils.getUuid(FTApplication.getApplication())
                 : LocalUUIDManager.get().getRandomUUID();
         hashMap.put(Constants.KEY_DEVICE_UUID, uuid);
-        HashMap<String, String> pkgInfo = getStringStringHashMap();
+        HashMap<String, String> pkgInfo = getInnerPkgInfoHashMap();
         if (!pkgInfo.isEmpty()) {
             pkgInfo.putAll(config.getPkgInfo());
         }
-        hashMap.put(Constants.KEY_RUM_SDK_PACKAGE_INFO, Utils.hashMapObjectToJson(pkgInfo));
+        hashMap.put(Constants.KEY_SDK_PACKAGE_INFO, Utils.hashMapObjectToJson(pkgInfo));
         hashMap.put(Constants.KEY_SDK_VERSION, FTSdk.AGENT_VERSION);
     }
 
-    private static HashMap<String, String> getStringStringHashMap() {
+    private static HashMap<String, String> getInnerPkgInfoHashMap() {
         HashMap<String, String> pkgInfo = new HashMap<>();
-        pkgInfo.put(Constants.KEY_RUM_SDK_PACKAGE_AGENT, FTSdk.AGENT_VERSION);
+        pkgInfo.put(Constants.KEY_SDK_PACKAGE_AGENT, FTSdk.AGENT_VERSION);
         if (!FTSdk.PLUGIN_VERSION.isEmpty()) {
-            pkgInfo.put(Constants.KEY_RUM_SDK_PACKAGE_TRACK, FTSdk.PLUGIN_VERSION);
+            pkgInfo.put(Constants.KEY_SDK_PACKAGE_TRACK, FTSdk.PLUGIN_VERSION);
         }
         if (!FTSdk.NATIVE_VERSION.isEmpty()) {
-            pkgInfo.put(Constants.KEY_RUM_SDK_PACKAGE_NATIVE, FTSdk.NATIVE_VERSION);
+            pkgInfo.put(Constants.KEY_SDK_PACKAGE_NATIVE, FTSdk.NATIVE_VERSION);
+        }
+        if (!FTSdk.SESSION_REPLAY_VERSION.isEmpty()) {
+            pkgInfo.put(Constants.KEY_RUM_SDK_PACKAGE_REPLAY, FTSdk.SESSION_REPLAY_VERSION);
         }
         return pkgInfo;
     }
@@ -421,6 +474,45 @@ public class FTSdk {
     public static void flushSyncData() {
         if (checkInstallState()) {
             SyncTaskManager.get().executePoll();
+        }
+    }
+
+    /**
+     * Set datakit URL dynamically
+     * After setting, normal data upload will resume
+     *
+     * @param datakitUrl datakit upload address
+     */
+    public static void setDatakitUrl(@NonNull String datakitUrl) {
+        if (checkInstallState()) {
+            FTHttpConfigManager.get().setDatakitUrl(datakitUrl);
+            triggerPendingRemoteConfigInit();
+        }
+    }
+
+    /**
+     * Set dataway URL and client token dynamically
+     * After setting, normal data upload will resume
+     *
+     * @param datawayUrl  dataway upload address
+     * @param clientToken token
+     */
+    public static void setDatawayUrl(@NonNull String datawayUrl, @NonNull String clientToken) {
+        if (checkInstallState()) {
+            FTHttpConfigManager.get().setDatawayUrl(datawayUrl, clientToken);
+            triggerPendingRemoteConfigInit();
+        }
+    }
+
+
+    /**
+     * Trigger pending remote config initialization if any
+     */
+    private static void triggerPendingRemoteConfigInit() {
+        if (mFtSdk.mRemoteConfigManager != null && mFtSdk.pendingRemoteConfigAppId != null) {
+            LogUtils.d(TAG, "Triggering pending remote config init with appId: " + mFtSdk.pendingRemoteConfigAppId);
+            mFtSdk.mRemoteConfigManager.initFromRemote(mFtSdk.pendingRemoteConfigAppId);
+            mFtSdk.pendingRemoteConfigAppId = null;
         }
     }
 

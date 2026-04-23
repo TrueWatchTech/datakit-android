@@ -6,11 +6,9 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
-import android.os.SystemClock;
 
 import androidx.annotation.NonNull;
 
-import com.ft.sdk.garble.bean.AppState;
 import com.ft.sdk.garble.utils.AopUtils;
 import com.ft.sdk.garble.utils.Constants;
 import com.ft.sdk.garble.utils.LogUtils;
@@ -76,7 +74,7 @@ class LifeCircleTraceCallback {
             if (mInited) {
                 //hot start
                 startTimeNanoTime = Utils.getCurrentNanoTime();
-                startClockTimeNano = SystemClock.elapsedRealtimeNanos();
+                startClockTimeNano = System.nanoTime();
             }
         }
 
@@ -89,12 +87,13 @@ class LifeCircleTraceCallback {
      * @param context
      */
     public void onPreOnCreate(Context context) {
-        mCreateMap.put(context, SystemClock.elapsedRealtimeNanos());
+        mCreateMap.put(context, System.nanoTime());
+        FTAppStartCounter.get().checkFirstActivityPreCreate(System.nanoTime());
         if (!mInited) {
 //            FTAutoTrack.startApp();
             // warn start
             startTimeNanoTime = Utils.getCurrentNanoTime();
-            startClockTimeNano = SystemClock.elapsedRealtimeNanos();
+            startClockTimeNano = System.nanoTime();
         }
     }
 
@@ -111,7 +110,7 @@ class LifeCircleTraceCallback {
             if (config.isEnableTraceUserView()) {
                 Long startTime = mCreateMap.get(context);
                 if (startTime != null) {
-                    long durationNS = SystemClock.elapsedRealtimeNanos() - startTime;
+                    long durationNS = System.nanoTime() - startTime;
                     String viewName = AopUtils.getClassName(context);
                     FTViewActivityTrackingHandler handler = config.getViewActivityTrackingHandler();
                     if (handler != null) {
@@ -140,20 +139,24 @@ class LifeCircleTraceCallback {
      * see <a href="https://developer.android.com/topic/performance/vitals/launch-time?hl=zh-cn#warm">Launch time calculation rules</a>
      * After {@link Activity#onResume() }
      *
-     * @param context
+     * @param activity
      */
-    public void onPostResume(Context context) {
+    public void onPostResume(Activity activity) {
         FTRUMConfigManager manager = FTRUMConfigManager.get();
         FTRUMConfig config = manager.getConfig();
 
         if (!mInited) {
-            FTActivityManager.get().setAppState(AppState.RUN);
-            FTAppStartCounter.get().coldStart(Utils.getCurrentNanoTime());
-            if (manager.isRumEnable() && config.isEnableTraceUserAction()) {
-                // If SDK is not initialized, this data will be supplemented 
-                // after SDK delayed initialization
-                FTAppStartCounter.get().coldStartUpload();
-            }
+            FTAppStartCounter.get().checkFirstFrameStart(activity, new Runnable() {
+                @Override
+                public void run() {
+                    FTAppStartCounter.get().coldStart(System.nanoTime());
+                    if (manager.isRumEnable() && config.isEnableTraceUserAction()) {
+                        // If SDK is not initialized, this data will be supplemented
+                        // after SDK delayed initialization
+                        FTAppStartCounter.get().coldStartUpload();
+                    }
+                }
+            });
         }
 
         // Already sleeping
@@ -161,21 +164,25 @@ class LifeCircleTraceCallback {
             if (mInited) {
                 if (config.isRumEnable() && config.isEnableTraceUserAction()) {
                     if (startTimeNanoTime > 0) {
-                        long now = SystemClock.elapsedRealtimeNanos();
+                        long now = System.nanoTime();
                         FTAppStartCounter.get().hotStart(now - startClockTimeNano,
                                 startTimeNanoTime);
 
                     }
 
                 }
+                FTSdk.updateRemoteConfig();
             }
-            FTSdk.updateRemoteConfig();
             alreadySleep = false;
         }
         // Avoid duplicate calculation of page startup statistics
         if (!mInited) {
             mInited = true;
         }
+    }
+
+    public void onPreResume(Activity activity) {
+        FTActivityManager.get().setCurrentActivity(activity);
     }
 
     /**

@@ -3,6 +3,7 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission
         android:name="android.permission.LOCAL_MAC_ADDRESS"
         tools:ignore="ProtectedPermissions" />
@@ -35,13 +36,33 @@
         <activity android:name=".RepeatActivity" />
         <activity android:name=".TabViewActivity" />
         <activity android:name=".ManualRUMActivity" />
+        <activity android:name=".SRActivity" />
+        <activity android:name=".SRComposeActivity" />
+        <activity android:name=".SRMaterialButtonActivity" />
+        <activity android:name=".LargeImageTestActivity" />
         <activity android:name=".HighLoadActivity" />
         <activity android:name=".IgnoreClassActivity" />
+        <activity android:name=".SRPrivacyOverrideActivity" />
         <activity android:name=".FragmentActivity" />
         <activity android:name=".ClickTestActivity" />
         <activity android:name=".HandlerTestActivity" />
         <activity android:name=".ActivityTrackingTestActivity" />
         <activity android:name=".FragmentTrackingTestActivity" />
+        <activity android:name=".NetworkTestActivity" />
+
+        <!--provider override setting-->
+        <!--        <provider-->
+        <!--            tools:replace="android:authorities"-->
+        <!--            android:name="com.ft.sdk.garble.db.FTContentProvider"-->
+        <!--            android:authorities="com.app.custom.provider"-->
+        <!--            android:exported="false"-->
+        <!--            android:multiprocess="true" >-->
+        <!--        </provider>-->
+        <!--        -->
+        <!--        <meta-data-->
+        <!--            tools:replace="android:value"-->
+        <!--            android:name="com.ft.sdk.PROVIDER_AUTHORITY"-->
+        <!--            android:value="com.app.custom.provider" />-->
 
         <service
             android:name=".service.TestService"

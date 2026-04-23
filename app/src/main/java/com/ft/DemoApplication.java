@@ -1,35 +1,45 @@
 package com.ft;
 
-import android.app.Activity;
 import android.content.Context;
 
-import com.ft.sdk.ActionEventWrapper;
 import com.ft.sdk.DeviceMetricsMonitorType;
 import com.ft.sdk.EnvType;
 import com.ft.sdk.ErrorMonitorType;
-import com.ft.sdk.FTActionTrackingHandler;
 import com.ft.sdk.FTLoggerConfig;
 import com.ft.sdk.FTRUMConfig;
+import com.ft.sdk.FTRemoteConfigManager;
 import com.ft.sdk.FTSDKConfig;
 import com.ft.sdk.FTSdk;
 import com.ft.sdk.FTTraceConfig;
-import com.ft.sdk.FTViewActivityTrackingHandler;
-import com.ft.sdk.FTViewFragmentTrackingHandler;
-import com.ft.sdk.FragmentWrapper;
-import com.ft.sdk.HandlerAction;
-import com.ft.sdk.HandlerView;
+import com.ft.sdk.FTTraceInterceptor;
+import com.ft.sdk.FTTraceManager;
 import com.ft.sdk.LogCacheDiscard;
 import com.ft.sdk.RUMCacheDiscard;
+import com.ft.sdk.TraceContext;
 import com.ft.sdk.TraceType;
+import com.ft.sdk.garble.bean.RemoteConfigBean;
 import com.ft.sdk.garble.bean.Status;
 import com.ft.sdk.garble.bean.UserData;
 import com.ft.sdk.garble.utils.LogUtils;
+import com.ft.sdk.sessionreplay.CustomExtensionSupport;
+import com.ft.sdk.sessionreplay.FTSessionReplayConfig;
+import com.ft.sdk.sessionreplay.ImagePrivacy;
+import com.ft.sdk.sessionreplay.MapperTypeWrapper;
+import com.ft.sdk.sessionreplay.TextAndInputPrivacy;
+import com.ft.sdk.sessionreplay.TouchPrivacy;
+import com.ft.sdk.sessionreplay.compose.ComposeExtensionSupport;
+import com.ft.sdk.sessionreplay.internal.recorder.mapper.WebViewXWireframeMapper;
+import com.ft.sdk.sessionreplay.material.MaterialExtensionSupport;
 import com.ft.utils.CrossProcessSetting;
 import com.lzy.okgo.OkGo;
+
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.util.HashMap;
 
 import okhttp3.OkHttpClient;
+import okhttp3.Request;
 
 /**
  * BY huangDianHua
@@ -65,15 +75,40 @@ public class DemoApplication extends BaseApplication {
 
 
     static void initFTSDK(Context context) {
-        FTSDKConfig ftSDKConfig = FTSDKConfig.builder(BuildConfig.DATAKIT_URL)
+        FTSDKConfig ftSDKConfig = FTSDKConfig.builder(BuildConfig.DATAWAY_URL,BuildConfig.CLIENT_TOKEN)
                 .setDebug(true)//Set whether it's debug
                 .setAutoSync(true)
                 .setCustomSyncPageSize(10)
                 .setOnlySupportMainProcess(CrossProcessSetting.isOnlyMainProcess(context))
                 .setNeedTransformOldCache(true)
                 .setCompressIntakeRequests(true)
-                .setRemoteConfiguration(true)
                 .setSyncSleepTime(100)
+                .setRemoteConfiguration(true)
+                .setRemoteConfigurationCallBack(new FTRemoteConfigManager.FetchResult() {
+                    @Override
+                    public void onResult(boolean success) {
+
+                    }
+
+                    @Override
+                    public RemoteConfigBean onConfigSuccessFetched(RemoteConfigBean configBean, String jsonString) {
+
+                        boolean isVip = false;
+                        try {
+                            JSONObject jsonObject = new JSONObject(jsonString);
+                            String userid = jsonObject.optString("custom_userid");
+                            isVip = (userid.equals("custom_user_test1"));
+                        } catch (JSONException e) {
+                        }
+
+                        if (isVip) {
+                            configBean.setLogSampleRate(0f);
+                            configBean.setRumSampleRate(0f);
+                            configBean.setTraceSampleRate(0f);
+                        }
+                        return configBean;
+                    }
+                })
 //                .setDataModifier(new DataModifier() {
 //                    @Override
 //                    public Object modify(String key, Object value) {
@@ -177,8 +212,32 @@ public class DemoApplication extends BaseApplication {
                 .setSamplingRate(1f)
                 .setEnableAutoTrace(true)
                 .setEnableLinkRUMData(true)
+                // Adapts to configured TraceType. For custom traceId/spanId use new TraceContext.Simple(headers, traceId, spanId)
+                .setOkHttpTraceHeaderHandler(new FTTraceInterceptor.HeaderHandler() {
+                    @Override
+                    public TraceContext getTraceContext(Request request) {
+                        HashMap<String, String> headers = FTTraceManager.get()
+                                .getTraceHeader(request.url().toString());
+                        return TraceContext.Simple.fromTraceType(headers);
+                    }
+                })
                 .setTraceType(TraceType.DDTRACE));
 
+        FTSdk.initSessionReplayConfig(new FTSessionReplayConfig()
+                        .setSampleRate(1f)
+//                        .setSessionReplayOnErrorSampleRate(1f)
+//                        .setPrivacy(SessionReplayPrivacy.MASK)
+                        .setTouchPrivacy(TouchPrivacy.SHOW)
+                        .setTextAndInputPrivacy(TextAndInputPrivacy.MASK_SENSITIVE_INPUTS)
+                        .enableLinkRUMKeys(new String[]{"wgt_id"})
+                        .setImagePrivacy(ImagePrivacy.MASK_NONE)
+                        .addExtensionSupport(new ComposeExtensionSupport())
+                        .addExtensionSupport(new MaterialExtensionSupport())
+                        .addExtensionSupport(new CustomExtensionSupport()
+                                .addMapper(new MapperTypeWrapper<>(com.tencent.smtt.sdk.WebView.class,
+                                        new WebViewXWireframeMapper())))
+
+        );
 
     }
 

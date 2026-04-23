@@ -23,9 +23,14 @@ public class ActionBean {
      */
     String id = Utils.randomUUID();
     /**
-     * Action start time
+     * Action Start time
      */
     long startTime = Utils.getCurrentNanoTime();
+
+    /**
+     * Action Start time for duration, unit: nanoseconds
+     */
+    long startTimeNanoForDuration = System.nanoTime();
 
     /**
      * Action name, {@link Constants#KEY_RUM_ACTION_NAME}
@@ -80,8 +85,10 @@ public class ActionBean {
      */
     String viewReferrer;
 
+    boolean hasReplay;
+
     /**
-     * Action additional properties, {@link  Constants#KEY_RUM_PROPERTY}
+     * Action additional properties, {@link  Constants#KEY_RUM_SDK_INNER_KEY_PROPERTY}
      */
     HashMap<String, Object> property = new HashMap<>();
 
@@ -132,6 +139,10 @@ public class ActionBean {
 
     public long getStartTime() {
         return startTime;
+    }
+
+    public long getStartTimeNanoForDuration() {
+        return startTimeNanoForDuration;
     }
 
     public String getActionName() {
@@ -220,6 +231,14 @@ public class ActionBean {
         this.collectType = collectType.getValue();
     }
 
+    public void setHasReplay(boolean hasReplay) {
+        this.hasReplay = hasReplay;
+    }
+
+    public boolean isHasReplay() {
+        return hasReplay;
+    }
+
     /**
      * Convert action property data to JSON string, written when data is stored in local cache
      *
@@ -227,9 +246,11 @@ public class ActionBean {
      */
     public String getAttrJsonString() {
         HashMap<String, Object> map = new HashMap<>();
-        map.put(Constants.KEY_RUM_PROPERTY, property);
-        map.put(Constants.KEY_RUM_TAGS, tags);
-        map.put(Constants.KEY_COLLECT_TYPE, collectType);
+        map.put(Constants.KEY_RUM_SDK_INNER_KEY_PROPERTY, property);
+        map.put(Constants.KEY_RUM_SDK_INNER_KEY_TAGS, tags);
+        map.put(Constants.KEY_RUM_SDK_INNER_KEY_COLLECT_TYPE, collectType);
+        map.put(Constants.KEY_RUM_SDK_INNER_KEY_START_TIME_NANO, startTimeNanoForDuration);
+        map.put(Constants.KEY_HAS_REPLAY, hasReplay);
         return Utils.hashMapObjectToJson(map);
     }
 
@@ -243,8 +264,9 @@ public class ActionBean {
         try {
 
             JSONObject json = new JSONObject(jsonString);
-            this.collectType = json.getString(Constants.KEY_COLLECT_TYPE);
-            JSONObject jsonProperty = json.optJSONObject(Constants.KEY_RUM_PROPERTY);
+            this.collectType = json.getString(Constants.KEY_RUM_SDK_INNER_KEY_COLLECT_TYPE);
+            this.startTimeNanoForDuration= json.optLong(Constants.KEY_RUM_SDK_INNER_KEY_START_TIME_NANO);
+            JSONObject jsonProperty = json.optJSONObject(Constants.KEY_RUM_SDK_INNER_KEY_PROPERTY);
             if (jsonProperty != null) {
                 Iterator<String> keys = jsonProperty.keys();
 
@@ -254,7 +276,7 @@ public class ActionBean {
                 }
             }
 
-            JSONObject jsonTags = json.optJSONObject(Constants.KEY_RUM_TAGS);
+            JSONObject jsonTags = json.optJSONObject(Constants.KEY_RUM_SDK_INNER_KEY_TAGS);
             if (jsonTags != null) {
                 Iterator<String> keys = jsonTags.keys();
                 while (keys.hasNext()) {
@@ -263,6 +285,7 @@ public class ActionBean {
                 }
             }
 
+            this.hasReplay = json.optBoolean(Constants.KEY_HAS_REPLAY, false);
         } catch (JSONException e) {
             LogUtils.e(TAG, LogUtils.getStackTraceString(e));
 

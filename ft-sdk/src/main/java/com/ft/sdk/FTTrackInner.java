@@ -86,6 +86,10 @@ public class FTTrackInner {
         dataHelper.initRUMConfig(config);
     }
 
+    HashMap<String, Object> getSessionReplayRUMLinksKeys(String[] links) {
+        return dataHelper.checkSessionReplayRUMLinksKeys(links);
+    }
+
     /**
      * Dynamically set global tag
      *
@@ -93,6 +97,7 @@ public class FTTrackInner {
      */
     void appendGlobalContext(HashMap<String, Object> globalContext) {
         dataHelper.appendGlobalContext(globalContext);
+        SessionReplayManager.get().appendSessionReplayRUMLinkKeys(globalContext);
     }
 
     /**
@@ -103,6 +108,7 @@ public class FTTrackInner {
      */
     void appendGlobalContext(String key, String value) {
         dataHelper.appendGlobalContext(key, value);
+        SessionReplayManager.get().appendSessionReplayRUMLinkKeys(key, value);
     }
 
     /**
@@ -112,6 +118,7 @@ public class FTTrackInner {
      */
     void appendRUMGlobalContext(HashMap<String, Object> globalContext) {
         dataHelper.appendRUMGlobalContext(globalContext);
+        SessionReplayManager.get().appendSessionReplayRUMLinkKeys(globalContext);
     }
 
     /**
@@ -122,6 +129,7 @@ public class FTTrackInner {
      */
     void appendRUMGlobalContext(String key, String value) {
         dataHelper.appendRUMGlobalContext(key, value);
+        SessionReplayManager.get().appendSessionReplayRUMLinkKeys(key,value);
     }
 
     /**
@@ -159,10 +167,11 @@ public class FTTrackInner {
             case NOT_COLLECT:
                 break;
             case COLLECT_BY_ERROR_SAMPLE:
+                //only view change data time
                 if (measurement.equals(Constants.FT_MEASUREMENT_RUM_VIEW)) {
-                    fields.put(Constants.KEY_SAMPLED_FOR_ERROR_SESSION, true);
+                    fields.put(Constants.KEY_RUM_SAMPLED_FOR_ERROR_SESSION, true);
                     long errorTimestamp = HashMapUtils.getLong(fields,
-                            Constants.KEY_SESSION_ERROR_TIMESTAMP, 0L);
+                            Constants.KEY_RUM_SESSION_ERROR_TIMESTAMP, 0L);
                     viewDataGenerateTime = errorTimestamp > 0 ? errorTimestamp : Utils.getCurrentNanoTime();
                 }
             case COLLECT_BY_SAMPLE:
@@ -230,6 +239,17 @@ public class FTTrackInner {
                 try {
                     SyncData recordData = SyncData.getSyncData(dataHelper, dataType,
                             new LineProtocolBean(measurement, tags, fields, time), dataGenerateTime);
+                    if (measurement.equals(Constants.FT_MEASUREMENT_RUM_VIEW)) {
+                        boolean update = FTDBManager.get().updateOrInsertSyncData(recordData);
+                        if (update) {
+                            LogUtils.d(TAG, "syncDataBackground:view," + dataType.toString() + " update,"
+                                    + " uuid:" + recordData.getUuid());
+                            if (callBack != null) {
+                                callBack.onComplete();
+                            }
+                            return;
+                        }
+                    }
                     synchronized (FTDBCachePolicy.get().getRumLock()) {
                         int status = FTDBCachePolicy.get().optRUMCachePolicy(1);
                         StringBuilder errorDec = new StringBuilder();

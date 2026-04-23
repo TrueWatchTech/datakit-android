@@ -51,7 +51,7 @@ public class ActiveActionBean extends ActionBean {
      */
     public void close() {
         this.isClose = true;
-        duration = Utils.getCurrentNanoTime() - startTime;
+        duration = System.nanoTime() - startTimeNanoForDuration;
 //        if (duration > ACTION_NEED_WAIT_TIME_OUT) {
 //            duration = ACTION_NEED_WAIT_TIME_OUT;
 //        }
@@ -70,6 +70,7 @@ public class ActiveActionBean extends ActionBean {
         ActionBean bean = new ActionBean();
         bean.id = this.id;
         bean.startTime = this.startTime;
+        bean.startTimeNanoForDuration = this.startTimeNanoForDuration;
         bean.actionName = this.actionName;
         bean.actionType = this.actionType;
         bean.duration = this.duration;
@@ -81,6 +82,7 @@ public class ActiveActionBean extends ActionBean {
         bean.viewId = this.viewId;
         bean.viewName = this.viewName;
         bean.viewReferrer = this.viewReferrer;
+        bean.hasReplay = this.hasReplay;
         bean.property = this.property;
         bean.tags = this.tags;
         bean.collectType = this.collectType;

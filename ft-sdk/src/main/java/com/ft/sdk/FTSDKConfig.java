@@ -3,6 +3,7 @@ package com.ft.sdk;
 import androidx.annotation.NonNull;
 
 import com.ft.sdk.garble.utils.Constants;
+import com.ft.sdk.garble.utils.LogUtils;
 
 import java.net.Proxy;
 import java.util.HashMap;
@@ -13,6 +14,8 @@ import java.util.HashMap;
  * Description:
  */
 public class FTSDKConfig {
+    private static final String TAG = Constants.LOG_TAG_PREFIX + "FTSDKConfig";
+
     /**
      * datakit data write address
      */
@@ -44,6 +47,12 @@ public class FTSDKConfig {
      * Whether to enable db cache limit
      */
     private boolean limitWithDbSize = false;
+
+    boolean isMainProcess = false;
+
+    public boolean isMainProcess() {
+        return isMainProcess;
+    }
 
     /**
      *
@@ -167,9 +176,12 @@ public class FTSDKConfig {
         return remoteConfiguration;
     }
 
+    private FTRemoteConfigManager.FetchResult remoteConfigFetchResult;
+
     /**
      * Whether to enable remote configuration for data collection, default is off.
      * When enabled, SDK initialization or app hot start will trigger data update.
+     *
      * @param remoteConfiguration
      * @return
      */
@@ -178,10 +190,26 @@ public class FTSDKConfig {
         return this;
     }
 
+
+    /**
+     *
+     * @param remoteConfigFetchResult
+     * @return
+     */
+    public FTSDKConfig setRemoteConfigurationCallBack(FTRemoteConfigManager.FetchResult remoteConfigFetchResult) {
+        this.remoteConfigFetchResult = remoteConfigFetchResult;
+        return this;
+    }
+
+    public FTRemoteConfigManager.FetchResult getRemoteConfigFetchResult() {
+        return remoteConfigFetchResult;
+    }
+
     private int remoteConfigMiniUpdateInterval = 43200;//12 hour
 
     /**
      * Set the minimum interval for data update, unit: seconds, default 12 hours
+     *
      * @param remoteConfigMiniUpdateInterval
      * @return
      */
@@ -211,6 +239,18 @@ public class FTSDKConfig {
     private Object authenticator;
 
     /**
+     * Build necessary SDK configuration parameters without an initial upload URL.
+     * In this mode, the SDK can collect data first, but it will not upload until
+     * {@link FTSdk#setDatakitUrl(String)} or {@link FTSdk#setDatawayUrl(String, String)}
+     * is called later to provide a valid endpoint.
+     *
+     * @return {@link FTRUMConfig} SDK configuration
+     */
+    public static FTSDKConfig builder() {
+        return new FTSDKConfig();
+    }
+
+    /**
      * Build necessary SDK configuration parameters
      *
      * @param datakitUrl datakit upload address
@@ -229,6 +269,15 @@ public class FTSDKConfig {
      */
     public static FTSDKConfig builder(String datawayUrl, String clientToken) {
         return new FTSDKConfig(datawayUrl, clientToken);
+    }
+
+    /**
+     * SDK configuration constructor (no URL required initially)
+     */
+    private FTSDKConfig() {
+        this.datakitUrl = "";
+        this.datawayUrl = "";
+        this.clientToken = "";
     }
 
     /**
@@ -523,7 +572,7 @@ public class FTSDKConfig {
     }
 
     /**
-     * Set the interval time for each sync, sleep time between [0,100]
+     * Set the interval time for each sync, sleep time between [0,5000]，0 default
      *
      * @param sleepTimeMs Data sync interval time
      * @return

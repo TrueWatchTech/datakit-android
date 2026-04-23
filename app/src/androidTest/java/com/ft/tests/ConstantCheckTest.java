@@ -33,7 +33,7 @@ public class ConstantCheckTest extends BaseTest {
                 .builder(BuildConfig.DATAKIT_URL);
         FTSdk.install(ftsdkConfig);
 
-        FTSdk.initRUMWithConfig(new FTRUMConfig());
+        FTSdk.initRUMWithConfig(new FTRUMConfig().setRumAppId(TEST_FAKE_RUM_ID));
 
     }
 
@@ -41,7 +41,7 @@ public class ConstantCheckTest extends BaseTest {
     /**
      * Verify ft-plugin version number
      *
-     * {@link com.ft.sdk.garble.utils.Constants#KEY_RUM_SDK_PACKAGE_TRACK}
+     * {@link com.ft.sdk.garble.utils.Constants#KEY_SDK_PACKAGE_TRACK}
      */
     @Test
     public void pluginVersionTest() {
@@ -61,7 +61,7 @@ public class ConstantCheckTest extends BaseTest {
 
     /**
      * Verify ft-native version number
-     * {@link com.ft.sdk.garble.utils.Constants#KEY_RUM_SDK_PACKAGE_NATIVE}
+     * {@link com.ft.sdk.garble.utils.Constants#KEY_SDK_PACKAGE_NATIVE}
      */
     @Test
     public void nativeLibVersionTest() {

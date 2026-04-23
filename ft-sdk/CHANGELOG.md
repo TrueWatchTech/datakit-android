@@ -1,3 +1,357 @@
+# agent 1.7.0
+1. Added Session Replay capabilities, including WebView Session Replay, DCloud WebView support, and full-snapshot keyframe support for WebView containers.
+2. Added Session Replay and RUM context association, allowing WebView containers to be linked with the context of loaded HTML content.
+3. Added Session Replay error sampling support and enabled dynamic Session Replay control through remote configuration.
+4. Added image resource upload support for Session Replay, along with parameter passing and synchronization updates for userAgent and appVersion.
+5. Optimized Session Replay initialization, frame completion during sharding, frame generation and consumption, delayed writes, and disk write limits to improve recording and synchronization stability.
+6. Fixed issues involving WebView data loss, handling of invisible WebView states, blank playback caused by writes occurring too early, synchronization failures on lower OkHttp versions, and recording failures caused by bitmap recycling.
+7. Fixed crashes caused by calling certain view methods before layout completion, improving overall stability and compatibility.
+
+---
+# agent 1.7.0-beta01
+1. Same as 1.7.0-alpha41
+
+---
+# agent 1.7.0-alpha41
+1. merge from ft-sdk 1.6.17
+
+---
+# agent 1.7.0-alpha40
+1. Added image resource upload logic for Session Replay.
+2. ft-session-replay:>=0.1.3-alpha14
+
+---
+# agent 1.7.0-alpha39
+1. merge from ft-sdk 1.6.17-alpha02
+2. Prevent crashes caused by calling methods like TextView.getTotalPaddingTop()
+   before the UI layout is fully completed.
+3. Added Session Replay support to remote configuration.
+4. ft-session-replay:>=0.1.3-alpha13
+
+---
+# agent 1.7.0-alpha38
+1. Added compatibility for OkHttp 3.12.0 and lower versions, and fixed the issue
+   where replay data could not be synchronized on these older versions.
+
+---
+# agent 1.7.0-alpha37
+1. ft-session-replay:>=0.1.3-alpha12
+2. Fixed the issue where enabling ErrorSampleRate caused key playback data to be lost in WebView
+3. Optimized the logic for handling replay data when the WebView is not visible
+
+---
+# agent 1.7.0-alpha36
+1. ft-session-replay:>=0.1.3-alpha11
+2. Optimized the linkView frame completion process during Replay data sharding.
+
+---
+# agent 1.7.0-alpha35
+1. ft-session-replay:>=0.1.3-alpha10
+2. Optimized frame generation and consumption logic.
+3. Fixed the issue where recording failed due to bitmap recycling.
+
+---
+# agent 1.7.0-alpha34
+1. merge from ft-sdk 1.6.15-alpha09
+2. ft-session-replay:>=0.1.3-alpha08
+3. Added full snapshot keyframe Session Replay support for the WebView container
+
+---
+# agent 1.7.0-alpha33
+1. merge from ft-sdk 1.6.15-alpha07, 1.6.15-alpha08
+2. ft-session-replay:>=0.1.3-alpha07
+3. Increased the disk write limit for Session Replay
+4. Added RUM Session Replay context association feature,
+   and associated the WebView container with the context of the loaded HTML.
+
+---
+# agent 1.7.0-alpha31
+1. Added config validation for the WebView Session Replay feature
+
+---
+# agent 1.7.0-alpha30
+1. merge from ft-sdk 1.6.15-alpha06
+
+---
+# agent 1.7.0-alpha29
+1. Delayed write for WebView Session Replay data.
+2. ft-session-replay:>=0.1.3-alpha06
+
+---
+# agent 1.7.0-alpha28
+1. Fixed the issue where obtaining write too early caused WebView Session Replay to be blank, and added log output.
+2. ft-session-replay:>=0.1.3-alpha05
+
+---
+# agent 1.7.0-alpha27
+1. resolve missing container data with RUM data
+2. ft-session-replay:>=0.1.3-alpha04
+---
+# agent 1.7.0-alpha26
+1. Merge ft-sdk 1.6.15-alpha04
+2. Session replay support DCloud WebView
+3. ft-session-replay >= 0.1.3-alpha03
+
+---
+# agent 1.7.0-alpha25
+1. Merge ft-sdk 1.6.15-alpha03
+
+---
+# agent 1.7.0-alpha24
+1. Merge ft-sdk 1.6.15-alpha01
+
+---
+# agent 1.7.0-alpha23
+1. Webview Session Replay support, ft-session-replay >= 0.1.3-alpha01
+
+---
+# agent 1.7.0-alpha22
+1. Merge ft-sdk 1.6.14
+
+---
+# agent 1.7.0-alpha21
+1. Merge ft-sdk 1.6.13
+
+---
+# agent 1.7.0-alpha20
+1. Merge ft-sdk 1.6.12
+
+---
+# agent 1.7.0-alpha19
+1. Support for ft-session-replay error sampling feature
+
+---
+# agent 1.7.0-alpha18
+1. Merge ft-sdk 1.6.11
+
+---
+# agent 1.7.0-alpha17
+1. Merge ft-sdk 1.6.11-alpha02
+
+---
+# agent 1.7.0-alpha16
+1. Merge ft-sdk 1.6.10 version
+
+---
+# agent 1.7.0-alpha15
+1. Adapt to replay_0.1.1-alpha01 changes
+
+---
+# agent 1.7.0-alpha14
+1. Change userAgent display rules
+2. Merge ft-sdk 1.6.10-alpha02
+3. Integrate Session Replay sync requests into ft-sdk
+
+---
+# agent 1.7.0-alpha13
+1. Add userAgent and appVersion parameters passed to Session Replay
+
+---
+# agent 1.7.0-alpha12
+1. Merge ft-sdk 1.6.9
+2. X-Pkg-Id Session Replay data sync tracking adaptation
+
+---
+# agent 1.7.0-alpha11
+1. Merge ft-sdk 1.6.9-beta02
+
+---
+# agent 1.7.0-alpha10
+1. Merge ft-sdk 1.6.9-alpha01
+
+---
+# agent 1.7.0-alpha09
+1. Merge and update features from ft-sdk 1.6.3 to 1.6.8
+
+---
+# agent 1.7.0-alpha08
+1. Merge and update features from ft-sdk 1.6.1 and 1.6.2
+
+---
+# agent 1.7.0-alpha06
+1. Add default configuration for session replay addExtensionSupport
+
+---
+# agent 1.7.0-alpha05
+1. Adapt to session replay delayed initialization scenarios
+
+---
+# agent 1.7.0-alpha04
+1. Optimize view and resource session_has_replay display rules
+
+---
+# agent 1.7.0-alpha03
+1. Adjust sdk package information display rules
+2. Correct session_has_replay display rules
+
+---
+# agent 1.7.0-alpha02
+1. Support for enabling session replay recording feature
+
+---
+# agent 1.6.17
+1. Fixed an issue introduced in version 1.6.16 where remote dynamic configuration did not take effect on first load.
+2. Added `TraceContext` and `TraceContext.Simple` for custom trace header handling.
+   Override `HeaderHandler.getTraceContext(Request)` to provide headers,
+   traceId and spanId in one call. Fully backward compatible with existing `getTraceHeader`
+   `getTraceID`/`getSpanID` implementations.
+3. Support dynamic update of transmission endpoint with `FTSdk.setDatakitUrl(url)`,
+   `FTSdk.setDatawayUrl(datawayUrl,clientToken)`
+
+---
+# agent 1.6.17-beta01
+1. Same as 1.6.17-alpha03
+
+---
+# agent 1.6.17-alpha03
+1. fix remote config fetch result handling
+
+---
+# agent 1.6.17-alpha02
+1. Added `TraceContext` and `TraceContext.Simple` for custom trace header handling. 
+  Override `HeaderHandler.getTraceContext(Request)` to provide headers, 
+  traceId and spanId in one call. Fully backward compatible with existing `getTraceHeader` 
+  `getTraceID`/`getSpanID` implementations.
+2. Added `TraceContext.Simple.fromTraceType()` to extract traceId/spanId from headers 
+ by TraceType (`DDTRACE`, `ZIPKIN_MULTI_HEADER`, `ZIPKIN_SINGLE_HEADER`, `TRACEPARENT`, `JAEGER`, `SKYWALKING`). 
+ Use `new TraceContext.Simple(headers, traceId, spanId)` for custom traceId/spanId.
+3. Removed redundant remote condition callbacks.
+4. Support dynamic update of transmission endpoint
+
+---
+# agent 1.6.17-alpha01
+1. Optimized View Action data generation rules.
+
+# agent 1.6.16
+1. Added illegal character filtering for globalContext and property keys.
+2. Extended `resource_type` support to include image, media, font, CSS, JS, native.
+3. Support customizable configuration of remote variables.
+4. Resource added `resource_http_protocol`, `resource_request_size`, `resource_connection_reuse`.
+5. Refined cold start timing by adding `app_pre_application_init_time`,
+`app_application_init_time`, and `app_first_frame_init_time`.
+6. Added compatibility for OkHttp 3.12.+
+7. Fix the incorrect start time of Resource requests.
+8. Fix an occasional null pointer issue when retrieving actions and views during SDK shutdown.
+9. Optimize error stack formatting and fix incorrect line breaks in certain scenarios.
+10.	Limited long task detection while the app is in the background.
+11. Optimized the session refresh mechanism while the app is in the background.
+12. Optimize nano duration calculation in Action, View and Resource.
+
+---
+# agent 1.6.16-beta01
+1. Optimized handling of illegal characters in globalContext
+2. Fixed incorrect `resource_connection_reuse handling` and improved null handling 
+    for `resource_http_protocol`.
+
+---
+# agent 1.6.16-alpha01
+1. Limited long task detection while the app is in the background.
+2. Optimized the session refresh mechanism while the app is in the background.
+3. Added compatibility for OkHttp 3.12.0 and lower versions
+4. Added illegal character filtering for globalContext and property keys.
+5. Optimized the error stack format.
+6. Extended `resource_type` support to include image, media, font, CSS, JS, native.
+7. Optimize nano duration calculation in Action 、View and Resource.
+8. Fix the incorrect start time of Resource requests.
+9. Support customizable configuration of remote variables.
+10. Prevented View actions from causing null exceptions. Optimized HashMap-to-JSON conversion.
+11. Resource added `resource_http_protocol`, `resource_request_size`, `resource_connection_reuse`
+12. Refined cold start timing by adding `app_pre_application_init_time`, `app_application_init_time`,
+   and `app_first_frame_init_time`.
+
+---
+# agent 1.6.15
+1. Optimized the FPS monitoring mechanism by stopping detection when the app is in the background.
+2. Optimized the output of long logs more than 4K
+3. Optimized the generation of resource, long task, and error with View data.
+4. Improved the view generation rate and merged data with the same view_id.
+5. remove ActivityLifecycleCallbacks limit in child process
+6. Fixed the occasional issue where View data updates were lost.
+7. Fixed the issue where asynchronous network requests caused abnormal session refresh.
+8. Fixed the issue where reinitialization after SDK shutdown could not trigger idle shutdown.
+---
+# agent 1.6.15-beta01
+1. Same as agent 1.6.15-alpha10
+2. Fixed pending_resource_count in Action and View metrics
+
+---
+# agent 1.6.15-alpha10
+1. Optimized the FPS monitoring mechanism by stopping detection when the app is in the background.
+
+---
+# agent 1.6.15-alpha09
+1. Fixed the issue where reinitialization after SDK shutdown could not trigger idle shutdown.
+
+---
+# agent 1.6.15-alpha08
+1. Fixed the issue above ft-sdk:1.6.15-alpha04 where data retransmission caused data field loss.
+
+---
+# agent 1.6.15-alpha07
+1. Ensure FPS is started from the main thread
+2. Optimized the output of long logs more than 4K
+3. Added resource_id to network error types for data correlation.
+
+---
+# agent 1.6.15-alpha06
+1. remove ActivityLifecycleCallbacks limit in main process
+
+---
+# agent 1.6.15-alpha05
+1. Fix view and action error of status
+
+---
+# agent 1.6.15-alpha04
+1. Fixed the issue where asynchronous network requests caused abnormal session refresh.
+2. Optimized the generation of resource, long task, and error with View data.
+3. Improved the view generation rate and merged data with the same view_id.
+
+---
+# agent 1.6.15-alpha03
+1. WebView data collection supports Tencent X5
+
+---
+# agent 1.6.15-alpha02
+1. Added background field to error_situation
+
+---
+# agent 1.6.15-alpha01
+1. Fixed the incorrect way of retrieving the cursor count.
+
+---
+# agent 1.6.14
+1. Using ContentProvider to optimize compatibility issues in high-load multi-process data collection scenarios.
+2. Removed the `android.permission.READ_PHONE_STATE` declaration from the SDK AndroidManifest;
+   integrators need to add it themselves based on actual requirements.
+3. The child process only performs data collection and does not handle data synchronization.
+4. Added `x-client-timestamp` http header for time correction.
+
+---
+# agent 1.6.14-beta03
+1. The child process only performs data collection and does not handle data synchronization.
+
+---
+# agent 1.6.14-beta02
+1. Fixed scenarios where operations were not performed through the main process.
+2. Optimized batch write and delete scenarios.
+
+---
+# agent 1.6.14-beta01
+1. Same as agent 1.6.14-alpha02
+
+---
+# agent 1.6.14-alpha02
+1. Protect ContentProvider query operations with try-catch
+   and fix the issue where SQL LIMIT was not taking effect.
+
+---
+# agent 1.6.14-alpha01
+1. Using ContentProvider to optimize compatibility issues in high-load multi-process data collection scenarios.
+2. Removed the `android.permission.READ_PHONE_STATE` declaration from the SDK AndroidManifest;
+   integrators need to add it themselves based on actual requirements.
+3. Added `x-client-timestamp` http header for time correction.
+
+---
 # agent 1.6.13
 1. Added `FTRUMConfig.setActionTrackingHandler` to support custom user action tracking.
    This handler allows developers to customize how user actions (clicks, touches, etc.) are tracked in RUM data.
@@ -126,10 +480,7 @@
   and above support automatic ResourceID addition.
 2. Fixed the issue of circular calls with other crash collection SDKs when initializing RUM configuration multiple times.
 3. When jumping from a native page to a WebView page, the native page is used to fill in view_referrer in WebView data.
-
----
-# agent 1.6.10-alpha03
-1. Underlying network request library supports multiform.
+4. Underlying network request library supports multiform.
 
 ---
 # agent 1.6.10-alpha02

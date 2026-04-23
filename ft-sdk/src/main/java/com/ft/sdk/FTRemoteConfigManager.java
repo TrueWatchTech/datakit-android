@@ -11,6 +11,7 @@ import com.ft.sdk.garble.threadpool.RemoteConfigThreadPool;
 import com.ft.sdk.garble.utils.Constants;
 import com.ft.sdk.garble.utils.LogUtils;
 import com.ft.sdk.garble.utils.Utils;
+import com.ft.sdk.sessionreplay.FTSessionReplayConfig;
 
 import java.net.HttpURLConnection;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -24,19 +25,35 @@ public class FTRemoteConfigManager {
     private long lastUpdateTime;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private RemoteConfigBean mRemoteConfig;
+    private final FetchResult mFetchResult;
 
-    public FTRemoteConfigManager(int remoteConfigMiniUpdateInterval) {
+    public FTRemoteConfigManager(int remoteConfigMiniUpdateInterval, FTRemoteConfigManager.FetchResult result) {
         this.remoteConfigMiniUpdateInterval = remoteConfigMiniUpdateInterval;
+        this.mFetchResult = result;
     }
 
     /**
      * Returns remote configuration update result
      */
-    public interface FetchResult {
+    public static abstract class FetchResult {
         /**
+         * Called when remote configuration is fetched and before it's applied.
+         * You can modify the configBean to override remote configuration settings.
+         *
+         * @param configBean The remote configuration bean, can be modified to override settings
+         * @param jsonConfig config JSON string
+         * @return Modified RemoteConfigBean to use, or null to use the original configBean
+         */
+        public RemoteConfigBean onConfigSuccessFetched(RemoteConfigBean configBean, String jsonConfig) {
+            return null;
+        }
+
+        /**
+         * Called after configuration is applied (for backward compatibility)
+         *
          * @param success true for successful update or no data change, false for update failure
          */
-        void onResult(boolean success);
+        public abstract void onResult(boolean success);
     }
 
     public void initFromLocalCache() {
@@ -58,8 +75,7 @@ public class FTRemoteConfigManager {
     private void saveLastFetchDateline(long fetchDateLine) {
         SharedPreferences sp = Utils.getSharedPreferences(FTApplication.getApplication());
         sp.edit().putLong(Constants.FT_REMOTE_CONFIG_FETCH_TIME, fetchDateLine).apply();
-
-        lastUpdateTime = getCurrentTimeLineInSeconds();
+        lastUpdateTime = fetchDateLine;
     }
 
     void mergeSDKConfigFromCache(FTSDKConfig config) {
@@ -82,10 +98,6 @@ public class FTRemoteConfigManager {
 
             if (mRemoteConfig.getSyncPageSize() != null) {
                 config.setCustomSyncPageSize(mRemoteConfig.getSyncPageSize());
-            }
-
-            if (mRemoteConfig.getSyncSleepTime() != null) {
-                config.setSyncSleepTime(mRemoteConfig.getSyncSleepTime());
             }
 
             if (mRemoteConfig.getSyncSleepTime() != null) {
@@ -182,6 +194,17 @@ public class FTRemoteConfigManager {
         }
     }
 
+    void mergeSessionReplayConfigFromCache(FTSessionReplayConfig config) {
+        if (mRemoteConfig != null) {
+            if (mRemoteConfig.getSessionReplaySampleRate() != null) {
+                config.setSampleRate(mRemoteConfig.getSessionReplaySampleRate());
+            }
+            if (mRemoteConfig.getSessionReplayOnErrorSampleRate() != null) {
+                config.setSessionReplayOnErrorSampleRate(mRemoteConfig.getSessionReplayOnErrorSampleRate());
+            }
+        }
+    }
+
 
     void initFromRemote(String appId) {
         this.appId = appId;
@@ -196,10 +219,11 @@ public class FTRemoteConfigManager {
     void updateRemoteConfig(int remoteConfigMiniUpdateInterval, FetchResult result) {
         if (!running.get()) {
             if (Utils.isNullOrEmpty(appId)) {
-                result.onResult(false);
+                notifyFetchResult(result, false);
                 return;
             }
-            if (getCurrentTimeLineInSeconds() - lastUpdateTime >= remoteConfigMiniUpdateInterval) {
+            long elapsedTime = getCurrentTimeLineInSeconds() - lastUpdateTime;
+            if (elapsedTime >= remoteConfigMiniUpdateInterval) {
                 RemoteConfigThreadPool.get().execute(new Runnable() {
                     @Override
                     public void run() {
@@ -220,43 +244,121 @@ public class FTRemoteConfigManager {
                                     if (mRemoteConfig != null && md5.equals(mRemoteConfig.getMd5())) {
                                         LogUtils.d(TAG, "remote config no change");
                                         requestResult = true;
+                                        notifyFetchResult(result, true);
                                     } else {
                                         String saveJson = json.replaceAll("R\\.[^.]+\\.", "");
                                         LogUtils.d(TAG, "remote config:" + saveJson);
-                                        RemoteConfigBean configBean = RemoteConfigBean.buildFromConfigJson(saveJson);
+                                        RemoteConfigBean configBean = RemoteConfigBean.buildFromConfigJson(saveJson, md5);
                                         LogUtils.d(TAG, "RemoteConfigBean config:" + configBean);
                                         if (configBean.isValid()) {
-                                            String saveJsonWithMd5 = saveJson.replaceFirst("\\{", "{\"md5\":\"" + md5 + "\",");
-                                            saveRemoteConfigToLocCache(saveJsonWithMd5);
-                                            notifyHotUpdate(configBean);
+                                            // Allow FetchResult to override configBean settings
+                                            RemoteConfigBean finalConfigBean = applyFetchResultOverride(configBean, result);
+                                            saveRemoteConfigToLocCache(finalConfigBean.toJsonString());
+                                            // Apply the final config
+                                            notifyHotUpdate(finalConfigBean);
+                                            mRemoteConfig = finalConfigBean;
                                             requestResult = true;
+                                            notifyFetchResult(result, true);
                                         }
                                     }
-                                    saveLastFetchDateline(lastUpdateTime);
+                                    saveLastFetchDateline(getCurrentTimeLineInSeconds());
                                     running.set(false);
                                 }
 
                             } else {
                                 LogUtils.w(TAG, data.getMessage());
                             }
-                            if (result != null) {
-                                result.onResult(requestResult);
+                            if (!requestResult) {
+                                notifyFetchResult(result, false);
                             }
                         } catch (Exception e) {
                             LogUtils.e(TAG, "remote config load error:" + LogUtils.getStackTraceString(e));
+                            notifyFetchResult(result, false);
                         } finally {
                             running.set(false);
                         }
 
                     }
                 });
+            } else {
+                long remainingTime = remoteConfigMiniUpdateInterval - elapsedTime;
+                String timeFormat = formatTime(remainingTime);
+                notifyFetchResult(result, false);
+                LogUtils.w(TAG, "Remote config update skipped, need to wait " + timeFormat);
             }
         }
     }
 
+    /**
+     * Apply FetchResult override to RemoteConfigBean
+     * Allows FetchResult to modify the configuration before it's applied
+     *
+     * @param configBean  Original RemoteConfigBean from remote
+     * @param fetchResult FetchResult callback (can be null)
+     * @return Modified RemoteConfigBean or original if no override
+     */
+    private RemoteConfigBean applyFetchResultOverride(RemoteConfigBean configBean, FetchResult fetchResult) {
+        RemoteConfigBean finalConfig = configBean;
+
+        if (fetchResult == null) {
+            fetchResult = mFetchResult;
+        }
+
+        if (fetchResult != null) {
+            RemoteConfigBean overridden = fetchResult.onConfigSuccessFetched(configBean,
+                    configBean == null ? null : configBean.getContentJsonString());
+            if (overridden != null) {
+                finalConfig = overridden;
+                LogUtils.d(TAG, "FetchResult override applied from passed-in callback:" + finalConfig);
+            }
+        }
+        return finalConfig;
+    }
+
+    private void notifyFetchResult(FetchResult fetchResult, boolean requestResult) {
+        if (fetchResult == null) {
+            fetchResult = mFetchResult;
+        }
+        if (fetchResult != null) {
+            fetchResult.onResult(requestResult);
+        }
+    }
 
     private long getCurrentTimeLineInSeconds() {
         return System.currentTimeMillis() / 1000;
+    }
+
+    /**
+     * Format seconds to human-readable time string (h m s)
+     *
+     * @param seconds Total seconds
+     * @return Formatted time string like "1h 2m 3s" or "5m 30s" or "45s"
+     */
+    private String formatTime(long seconds) {
+        if (seconds <= 0) {
+            return "0s";
+        }
+        long hours = seconds / 3600;
+        long minutes = (seconds % 3600) / 60;
+        long secs = seconds % 60;
+
+        StringBuilder sb = new StringBuilder();
+        if (hours > 0) {
+            sb.append(hours).append("h");
+        }
+        if (minutes > 0) {
+            if (sb.length() > 0) {
+                sb.append(" ");
+            }
+            sb.append(minutes).append("m");
+        }
+        if (secs > 0 || sb.length() == 0) {
+            if (sb.length() > 0) {
+                sb.append(" ");
+            }
+            sb.append(secs).append("s");
+        }
+        return sb.toString();
     }
 
     private void notifyHotUpdate(RemoteConfigBean bean) {
@@ -272,8 +374,51 @@ public class FTRemoteConfigManager {
             if (bean.getLogEnableCustomLog() != null) {
                 loggerConfig.setEnableCustomLog(bean.getLogEnableCustomLog());
             }
-            if (bean.getLogEnableCustomLog() != null) {
+            if (bean.getLogEnableConsoleLog() != null) {
                 loggerConfig.setEnableConsoleLog(bean.getLogEnableConsoleLog());
+            }
+            if (bean.getLogSampleRate() != null) {
+                loggerConfig.setSamplingRate(bean.getLogSampleRate());
+            }
+        }
+
+        FTTraceConfig traceConfig = FTTraceConfigManager.get().getConfig();
+        if (traceConfig != null) {
+            if (bean.getTraceSampleRate() != null) {
+                traceConfig.setSamplingRate(bean.getTraceSampleRate());
+            }
+        }
+
+        FTRUMConfig rumConfig = FTRUMConfigManager.get().getConfig();
+        if (rumConfig.isRumEnable()) {
+            if (bean.getRumSampleRate() != null) {
+                rumConfig.setSamplingRate(bean.getRumSampleRate());
+            }
+            if (bean.getRumSessionOnErrorSampleRate() != null) {
+                rumConfig.setSessionErrorSampleRate(bean.getRumSessionOnErrorSampleRate());
+            }
+
+            SessionReplayManager replayManager = SessionReplayManager.get();
+            boolean replayEnable = replayManager.isReplayEnable();
+            Float sessionReplaySampleRate = null;
+            Float sessionReplayOnErrorSampleRate = null;
+            if (replayEnable) {
+                if (bean.getSessionReplaySampleRate() != null) {
+                    replayManager.setSampleRate(bean.getSessionReplaySampleRate());
+                }
+                sessionReplaySampleRate = replayManager.sampleRate();
+
+                if (bean.getSessionReplayOnErrorSampleRate() != null) {
+                    replayManager.setSessionReplayOnErrorSampleRate(bean.getSessionReplayOnErrorSampleRate());
+                }
+                sessionReplayOnErrorSampleRate = SessionReplayManager.get().sessionReplayOnErrorSampleRate();
+            }
+
+            boolean forceRefreshExecuted = FTRUMInnerManager.get().hotUpdate(bean.getRumSampleRate(),
+                    bean.getRumSessionOnErrorSampleRate());
+
+            if (replayEnable && !forceRefreshExecuted) {
+                SessionReplayManager.get().hotUpdate(sessionReplaySampleRate, sessionReplayOnErrorSampleRate);
             }
         }
     }

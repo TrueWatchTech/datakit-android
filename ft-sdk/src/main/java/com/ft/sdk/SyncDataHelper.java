@@ -73,11 +73,26 @@ public class SyncDataHelper {
 
     void initRUMConfig(FTRUMConfig config) {
         rumTags.putAll(basePublicTags);
-        rumStaticFields.put(Constants.KEY_SESSION_SAMPLE_RATE,
-                applyModifier(Constants.KEY_SESSION_SAMPLE_RATE, config.getSamplingRate()));
-        rumStaticFields.put(Constants.KEY_SESSION_ON_ERROR_SAMPLE_RATE,
-                applyModifier(Constants.KEY_SESSION_ON_ERROR_SAMPLE_RATE, config.getSessionErrorSampleRate()));
+        rumStaticFields.put(Constants.KEY_RUM_SESSION_SAMPLE_RATE,
+                applyModifier(Constants.KEY_RUM_SESSION_SAMPLE_RATE, config.getSamplingRate()));
+        rumStaticFields.put(Constants.KEY_RUM_SESSION_ON_ERROR_SAMPLE_RATE,
+                applyModifier(Constants.KEY_RUM_SESSION_ON_ERROR_SAMPLE_RATE, config.getSessionErrorSampleRate()));
         rumTags.putAll(applyModifier(config.getGlobalContext()));
+    }
+
+    HashMap<String, Object> checkSessionReplayRUMLinksKeys(String[] rumLinkKeys) {
+        HashMap<String, Object> rumLinkData = new HashMap<>();
+
+        // Check keys in tagMaps
+        for (String rumKey : rumLinkKeys) {
+            for (String tagKey : rumTags.keySet()) {
+                if (tagKey.contains(rumKey)) {
+                    rumLinkData.put(tagKey, rumTags.get(tagKey));
+                }
+            }
+        }
+        return rumLinkData;
+
     }
 
     /**
@@ -288,13 +303,13 @@ public class SyncDataHelper {
                 while (keys.hasNext()) {
                     String key = keys.next();
                     if (!key.equals(Constants.KEY_SERVICE)) {
-                        if (key.equals(Constants.KEY_RUM_SDK_PACKAGE_INFO)) {
-                            Object pkgInfo = rumTags.get(Constants.KEY_RUM_SDK_PACKAGE_INFO);
+                        if (key.equals(Constants.KEY_SDK_PACKAGE_INFO)) {
+                            Object pkgInfo = rumTags.get(Constants.KEY_SDK_PACKAGE_INFO);
                             if (pkgInfo != null) {
                                 String replacePkgInfo = PackageUtils.appendPackageVersion(pkgInfo.toString(),
                                         Constants.KEY_RUM_SDK_PACKAGE_WEB, webSDKVersion + "");
-                                mergeTags.put(Constants.KEY_RUM_SDK_PACKAGE_INFO,
-                                        applyModifier(Constants.KEY_RUM_SDK_PACKAGE_INFO, replacePkgInfo));
+                                mergeTags.put(Constants.KEY_SDK_PACKAGE_INFO,
+                                        applyModifier(Constants.KEY_SDK_PACKAGE_INFO, replacePkgInfo));
                             }
                         } else {
                             mergeTags.put(key, rumTags.get(key));

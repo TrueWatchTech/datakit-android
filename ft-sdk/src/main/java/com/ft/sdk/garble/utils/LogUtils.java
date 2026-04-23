@@ -1,8 +1,6 @@
 package com.ft.sdk.garble.utils;
 
 
-import static com.ft.sdk.garble.utils.TrackLog.showFullLog;
-
 import com.ft.sdk.FTApplication;
 import com.ft.sdk.FTInnerLogHandler;
 import com.ft.sdk.FTLogger;
@@ -85,50 +83,50 @@ public class LogUtils {
 
     public static void i(String tag, String message, boolean showLog) {
         if (showLog) {
-            showFullLog(tag, message, SDKLogLevel.I, false);
+            TrackLog.showFullInnerlog(tag, message, SDKLogLevel.I, false);
         }
     }
 
     public static void d(String tag, String message, boolean showLog) {
         if (showLog) {
-            showFullLog(tag, message, SDKLogLevel.D, false);
+            TrackLog.showFullInnerlog(tag, message, SDKLogLevel.D, false);
         }
     }
 
     public static void e(String tag, String message, boolean showLog) {
         if (showLog) {
-            showFullLog(tag, message, SDKLogLevel.E, false);
+            TrackLog.showFullInnerlog(tag, message, SDKLogLevel.E, false);
         }
     }
 
     private static void eOnce(String tag, String message, boolean showLog) {
         if (showLog) {
-            showFullLog(tag, message, SDKLogLevel.E, true);
+            TrackLog.showFullInnerlog(tag, message, SDKLogLevel.E, true);
         }
     }
 
     public static void v(String tag, String message, boolean showLog) {
         if (showLog) {
-            showFullLog(tag, message, SDKLogLevel.V, false);
+            TrackLog.showFullInnerlog(tag, message, SDKLogLevel.V, false);
         }
     }
 
     public static void w(String tag, String message, boolean showLog) {
         if (showLog) {
-            showFullLog(tag, message, SDKLogLevel.W, false);
+            TrackLog.showFullInnerlog(tag, message, SDKLogLevel.W, false);
         }
     }
 
     private static void wOnce(String tag, String message, boolean showLog) {
         if (showLog) {
-            showFullLog(tag, message, SDKLogLevel.W, true);
+            TrackLog.showFullInnerlog(tag, message, SDKLogLevel.W, true);
         }
     }
 
 
     public static void showAlias(String message) {
         if (aliasLogShow) {
-            showFullLog(TAG, message, SDKLogLevel.D, false);
+            TrackLog.showFullInnerlog(TAG, message, SDKLogLevel.D, false);
         }
     }
 
@@ -171,8 +169,8 @@ public class LogUtils {
      * {@link com.ft.sdk.tests.InnerLogTest}
      * Convert internal log to file
      *
-     * @param file           Cache file
-     * @param isAndroidTest  Whether it is Android Test
+     * @param file          Cache file
+     * @param isAndroidTest Whether it is Android Test
      */
     private static void registerInnerLogCacheToFile(File file, boolean isAndroidTest) {
         final LogFileHelper helper = new LogFileHelper(FTApplication.getApplication(), file, isAndroidTest);
@@ -180,7 +178,8 @@ public class LogUtils {
         TrackLog.setInnerLogHandler(new FTInnerLogHandler() {
             @Override
             public void printInnerLog(String level, String tag, String logContent) {
-                helper.appendLog(String.format("%s %s %s %s \n", Utils.getCurrentTimeStamp(), level, tag, logContent));
+                helper.appendLog(String.format("%s %s %s %s %s \n", Utils.getCurrentTimeStamp(), android.os.Process.myPid()
+                        + "-" + android.os.Process.myTid(), level, tag, logContent));
             }
         });
     }
@@ -217,6 +216,31 @@ public class LogUtils {
         registerInnerLogCacheToFile(new File(filePath));
     }
 
+
+    /**
+     * Returns the caller method info for debug logging.
+     *
+     * @param skipFrames Number of stack frames to skip. 0 = direct caller of this method,
+     *                   1 = caller of the caller, and so on.
+     * @return "ClassName.methodName (fileName:lineNumber)" or "unknown"
+     */
+    public static String getCallerMethodInfo(int skipFrames) {
+        StackTraceElement[] stack = new Throwable().getStackTrace();
+        int index = 2 + skipFrames;
+        if (index >= stack.length) {
+            return "unknown";
+        }
+        StackTraceElement e = stack[index];
+        return e.getClassName() + "." + e.getMethodName()
+                + " (" + e.getFileName() + ":" + e.getLineNumber() + ")";
+    }
+
+    /**
+     * Returns the direct caller's method info. Equivalent to {@link #getCallerMethodInfo(int) getCallerMethodInfo(0)}.
+     */
+    public static String getCallerMethodInfo() {
+        return getCallerMethodInfo(0);
+    }
 
     /**
      * {@link android.util.Log#getStackTraceString(Throwable)} Remove UnknownHostException exclusion logic

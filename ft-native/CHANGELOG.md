@@ -1,3 +1,12 @@
+# native 1.1.3-alpha02
+1. Prevented secondary crashes in libunwind.so.
+
+----------------------
+# native 1.1.3-alpha01
+1. Added null address detection for native crashes, and made libft_native_exp_lib.so use stricter null 
+   and wild pointer checks when performing backtraces with libunwind.so.
+
+----------------------
 # native 1.1.2
 1. Added support for Android 16K page size (Android 15+ compatibility)
 

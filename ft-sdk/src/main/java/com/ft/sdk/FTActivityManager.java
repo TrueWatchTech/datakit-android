@@ -6,6 +6,7 @@ import android.app.Activity;
 import com.ft.sdk.garble.bean.AppState;
 import com.ft.sdk.garble.utils.Constants;
 
+import java.lang.ref.WeakReference;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -21,6 +22,9 @@ public final class FTActivityManager {
      * Map of alive activities
      */
     private final ConcurrentHashMap<String, Boolean> activityOpenTypeMap = new ConcurrentHashMap<>();
+
+    private WeakReference<Activity> mCurrentActivity;
+
 
     /**
      * Default is {@link AppState#STARTUP}
@@ -42,45 +46,17 @@ public final class FTActivityManager {
     }
 
     /**
-     * Store how each {@link Activity} was opened
-     *
-     * @param className    Name of the derived {@link Activity} class
-     * @param fromFragment
+     * enter foreground
      */
-    void putActivityOpenFromFragment(String className, boolean fromFragment) {
-        activityOpenTypeMap.put(className, fromFragment);
+    void appForeground() {
+        this.appState = AppState.RUN;
     }
 
     /**
-     * Return how each Activity was opened
-     *
-     * @param className
-     * @return
+     * enter background
      */
-    boolean getActivityOpenFromFragment(String className) {
-        if (activityOpenTypeMap.containsKey(className)) {
-            return Boolean.TRUE.equals(activityOpenTypeMap.get(className));
-        }
-        return false;
-    }
-
-    /**
-     * Remove the open state of the corresponding Activity
-     *
-     * @param className
-     */
-    void removeActivityStatus(String className) {
-        activityOpenTypeMap.remove(className);
-    }
-
-
-    /**
-     * Set the current {@link AppState}
-     *
-     * @param state {@link AppState} application running state
-     */
-    void setAppState(AppState state) {
-        this.appState = state;
+    void appBackGround() {
+        this.appState = AppState.BACKGROUND;
     }
 
     /**
@@ -90,6 +66,14 @@ public final class FTActivityManager {
      */
     AppState getAppState() {
         return appState;
+    }
+
+    void setCurrentActivity(Activity activity) {
+        mCurrentActivity = new WeakReference<>(activity);
+    }
+
+    public Activity curentActivity() {
+        return mCurrentActivity != null ? mCurrentActivity.get() : null;
     }
 
 }

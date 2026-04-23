@@ -15,6 +15,10 @@ import javax.net.ssl.HttpsURLConnection;
 public class ResourceBean {
 
     /**
+     * request uuid
+     */
+    public String id = "";
+    /**
      * Request resource address
      */
     public String url = "";
@@ -66,14 +70,8 @@ public class ResourceBean {
      */
     public String resourceUrlQuery = "";
 
-    /**
-     * Trace ID {@link TraceBean#traceID}
-     */
     public String traceId = null;
 
-    /**
-     * Trace Span ID {@link TraceBean#spanID}
-     */
     public String spanId = null;
 
     /**
@@ -90,11 +88,6 @@ public class ResourceBean {
      * Request response code {@link  HttpsURLConnection#HTTP_OK,HttpsURLConnection#HTTP_UNAUTHORIZED} etc.
      */
     public int resourceStatus = 0;
-
-    /**
-     * Resource request size, unit byte
-     */
-    public long resourceSize = -1;
 
     /**
      * Resource load time unit
@@ -161,6 +154,25 @@ public class ResourceBean {
 
 
     /**
+     * Request body size
+     */
+    public long resourceRequestBodySize = -1;
+    /**
+     * Response body size
+     */
+    public long resourceResponseBodySize = -1;
+
+    /**
+     * Connection reuse
+     */
+    public boolean resourceConnectionReuse = false;
+
+    /**
+     * Resource http protocol
+     */
+    public String resourceProtocol = "";
+
+    /**
      * Host IP address
      */
     public String resourceHostIP = "";
@@ -172,9 +184,14 @@ public class ResourceBean {
     public long startTime = Utils.getCurrentNanoTime();
 
     /**
+     * Resource request start time System.nanoTime
+     */
+    public long startTimeNanoForDuration = System.nanoTime();
+
+    /**
      * Resource request end time
      */
-    public long endTime = -1;
+    public long endTimeNanoForDuration = -1;
 
     /**
      * Session ID, {@link  FTRUMInnerManager#sessionId}
@@ -217,5 +234,9 @@ public class ResourceBean {
      */
     public boolean contentSet = false;
 
+    /**
+     * Whether there is session replay
+     */
+    public boolean hasSessionReplay = false;
 
 }

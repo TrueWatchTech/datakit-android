@@ -3,6 +3,7 @@ package com.ft.sdk;
 
 import android.content.SharedPreferences;
 
+import com.ft.sdk.garble.FTHttpConfigManager;
 import com.ft.sdk.garble.bean.DataType;
 import com.ft.sdk.garble.bean.RemoteConfigBean;
 import com.ft.sdk.garble.bean.SyncData;
@@ -44,7 +45,7 @@ public class SyncTaskManager {
     /**
      * Maximum tolerated error count
      */
-    public static final int MAX_ERROR_COUNT = 5;
+    static final int MAX_ERROR_COUNT = 5;
 
     /**
      * Maximum sync sleep time, ms
@@ -103,6 +104,8 @@ public class SyncTaskManager {
      * Whether to perform automatic synchronization
      */
     private boolean autoSync;
+
+    private boolean isMainProcess;
 
     /**
      * Synchronization request interval time
@@ -224,6 +227,14 @@ public class SyncTaskManager {
      */
     void executeSyncPoll() {
         if (autoSync) {
+            if (!isMainProcess) {
+                LogUtils.wOnce(TAG, "Collect Data will sync on main process");
+                return;
+            }
+            if (!FTHttpConfigManager.get().isUrlAvailable()) {
+                LogUtils.wOnce(TAG, "Upload URL not configured, skipping sync");
+                return;
+            }
             executePoll(true);
         }
     }
@@ -248,11 +259,15 @@ public class SyncTaskManager {
             }
         }
         long now = Utils.getCurrentNanoTime();
-        int deleteCount = FTDBManager.get().deleteExpireCache(dataType, Utils.getCurrentNanoTime(), ONE_MINUTE_DURATION_NS);
+        int deleteCount = FTDBManager.get().deleteExpireCache(dataType, now, ONE_MINUTE_DURATION_NS);
         if (deleteCount > 0) {
             LogUtils.d(TAG, "errorSampledConsume deleteExpired:" + dataType + ","
                     + deleteCount + ", before ns:" + (now - ONE_MINUTE_DURATION_NS));
         }
+    }
+
+    long getErrorTimeLine() {
+        return errorTimeLine;
     }
 
     /**
@@ -375,9 +390,9 @@ public class SyncTaskManager {
      * @param list
      */
     private void deleteLastQuery(List<SyncData> list, boolean oldCache) {
-        List<String> ids = new ArrayList<>();
+        List<Long> ids = new ArrayList<>();
         for (SyncData r : list) {
-            ids.add(String.valueOf(r.getId()));
+            ids.add(r.getId());
         }
         FTDBManager.get().delete(ids, oldCache);
     }
@@ -400,10 +415,10 @@ public class SyncTaskManager {
      * <p>
      * Note: AndroidTest will call this method {@link com.ft.test.base.FTBaseTest#uploadData(DataType)}
      *
-     * @param dataType      Data type
-     * @param body          Data line protocol result
-     * @param pkgId         Chain package id
-     * @param syncCallback  Asynchronous object
+     * @param dataType     Data type
+     * @param body         Data line protocol result
+     * @param pkgId        Chain package id
+     * @param syncCallback Asynchronous object
      */
     private synchronized void requestNet(DataType dataType, String pkgId, String body,
                                          final RequestCallback syncCallback) throws FTNetworkNoAvailableException {
@@ -426,6 +441,7 @@ public class SyncTaskManager {
                 .addHeadParam(Constants.SYNC_DATA_CONTENT_TYPE_HEADER, Constants.SYNC_DATA_CONTENT_TYPE_VALUE)
                 .addHeadParam(Constants.SYNC_DATA_TRACE_HEADER,
                         String.format(Constants.SYNC_DATA_TRACE_HEADER_FORMAT, pkgId))
+                .addHeadParam(Constants.SYNC_DATA_DEVICE_TIME, System.currentTimeMillis() + "")
                 .setModel(model)
                 .setMethod(RequestMethod.POST)
                 .setBodyString(body).executeSync();
@@ -517,6 +533,7 @@ public class SyncTaskManager {
         dataSyncMaxRetryCount = config.getDataSyncRetryCount();
         pageSize = config.getPageSize();
         autoSync = config.isAutoSync();
+        isMainProcess = config.isMainProcess();
         syncSleepTime = config.getSyncSleepTime();
         if (config.isNeedTransformOldCache()) {
             oldCacheRunner = new Runnable() {

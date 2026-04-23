@@ -19,6 +19,7 @@ import android.util.Base64;
 import com.ft.sdk.FTApplication;
 import com.ft.sdk.garble.bean.ResourceID;
 import com.ft.sdk.garble.manager.SingletonGson;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 
@@ -221,6 +222,7 @@ public class Utils {
      */
     public static String translateTagKeyValue(String oldStr) {
         oldStr = oldStr.replace("\n", " ");
+        oldStr = oldStr.replace("\\", "");
         oldStr = translateSpecialCharacters(",", oldStr);
         oldStr = translateSpecialCharacters("=", oldStr);
         return translateSpecialCharacters(" ", oldStr);
@@ -232,6 +234,7 @@ public class Utils {
      * @return
      */
     public static String translateMeasurements(String oldStr) {
+        oldStr = oldStr.replace("\\", "");
         oldStr = translateSpecialCharacters(",", oldStr);
         return translateSpecialCharacters(" ", oldStr);
     }
@@ -363,12 +366,21 @@ public class Utils {
      */
     public static String readFile(String path, Charset encoding) throws IOException {
         FileInputStream fis = null;
-        fis = new FileInputStream(path);
-        int length = fis.available();
-        byte[] bytes = new byte[length];
-        fis.read(bytes);
-        fis.close();
-        return new String(bytes, encoding);
+        try {
+            fis = new FileInputStream(path);
+            int length = fis.available();
+            byte[] bytes = new byte[length];
+            fis.read(bytes);
+            return new String(bytes, encoding);
+        } finally {
+            if (fis != null) {
+                try {
+                    fis.close();
+                } catch (IOException e) {
+                    LogUtils.e(TAGS, "Error closing FileInputStream: " + e.getMessage());
+                }
+            }
+        }
     }
 
     /**
@@ -399,8 +411,8 @@ public class Utils {
     public static boolean isJSONValid(String json) {
         try {
             JsonParser parser = new JsonParser();
-            parser.parse(json);
-            return true;
+            JsonElement element = parser.parse(json);
+            return element.isJsonObject() || element.isJsonArray();
         } catch (JsonParseException e) {
             return false;
         }
@@ -669,11 +681,11 @@ public class Utils {
                     // For non-basic types, use Gson for conversion
                     jsonBuilder.append(SingletonGson.getInstance().toJson(value));
                 }
-                jsonBuilder.append(", ");
+                jsonBuilder.append(",");
             }
             if (!map.isEmpty()) {
-                // Delete the last comma and space
-                jsonBuilder.delete(jsonBuilder.length() - 2, jsonBuilder.length());
+                // Delete the last comma
+                jsonBuilder.delete(jsonBuilder.length() - 1, jsonBuilder.length());
             }
             jsonBuilder.append("}");
         } catch (Exception e) {
@@ -863,14 +875,14 @@ public class Utils {
     }
 
     /**
-     * Get App startup time
+     * Get App startup time，System.nanoTime
      *
      * @return
      */
     public static long getAppStartTimeNs() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             long diffMs = SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime();
-            return getCurrentNanoTime() - TimeUnit.MILLISECONDS.toNanos(diffMs);
+            return System.nanoTime()- TimeUnit.MILLISECONDS.toNanos(diffMs);
         } else {
             return FTApplication.APP_START_TIME;
         }
@@ -893,6 +905,55 @@ public class Utils {
             LogUtils.e(TAG, LogUtils.getStackTraceString(e));
         }
         return "";
+    }
+
+    public static boolean checkContextChanged(String viewId, Map<String, Map<String, Object>> fieldLinkMap, Map<String, Object> property) {
+        if (viewId == null || property == null || fieldLinkMap == null) {
+            return false;
+        }
+
+        Map<String, Object> existingData = fieldLinkMap.get(viewId);
+        return Utils.checkMapChanged(existingData, property);
+    }
+
+
+    /**
+     * Check if two maps have changed by comparing their content
+     *
+     * @param existingData The existing map data
+     * @param newData      The new map data to compare
+     * @return true if data has changed, false otherwise
+     */
+    public static boolean checkMapChanged(Map<String, Object> existingData, Map<String, Object> newData) {
+        if (newData == null) {
+            return false;
+        }
+
+        // If existingData is null, it's new data, return true
+        if (existingData == null) {
+            return true;
+        }
+
+        // Compare existing data with new data
+        // First check if the number of fields is the same
+        if (existingData.size() != newData.size()) {
+            return true;
+        }
+
+        // Check if each field value is the same
+        for (Map.Entry<String, Object> entry : newData.entrySet()) {
+            String key = entry.getKey();
+            Object newValue = entry.getValue();
+            Object existingValue = existingData.get(key);
+
+            // If field doesn't exist or values are not equal, data has changed
+            if (existingValue == null || !existingValue.equals(newValue)) {
+                return true;
+            }
+        }
+
+        // All fields are the same, no changes
+        return false;
     }
 
 }

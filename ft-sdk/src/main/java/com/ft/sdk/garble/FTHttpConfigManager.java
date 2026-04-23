@@ -127,6 +127,10 @@ public class FTHttpConfigManager {
         return userAgent;
     }
 
+    public String getUserAgentForSR() {
+        return userAgent + " (Mode=Replay; Version=" + com.ft.sdk.sessionreplay.BuildConfig.VERSION_NAME + ")";
+    }
+
     public int getSendOutTime() {
         return sendOutTime;
     }
@@ -137,6 +141,42 @@ public class FTHttpConfigManager {
 
     public boolean isCompressIntakeRequests() {
         return compressIntakeRequests;
+    }
+
+    /**
+     * Set datakit URL dynamically
+     *
+     * @param datakitUrl datakit upload address
+     */
+    public void setDatakitUrl(String datakitUrl) {
+        this.datakitUrl = datakitUrl;
+        this.datawayUrl = "";
+        this.clientToken = "";
+        LogUtils.d(TAG, "serverUrl ==>\nDatakit Url:" + datakitUrl);
+    }
+
+    /**
+     * Set dataway URL and client token dynamically
+     *
+     * @param datawayUrl  dataway upload address
+     * @param clientToken token
+     */
+    public void setDatawayUrl(String datawayUrl, String clientToken) {
+        this.datawayUrl = datawayUrl;
+        this.clientToken = clientToken;
+        this.datakitUrl = "";
+        String maskToken = StringUtils.maskHalfCharacter(clientToken);
+        LogUtils.d(TAG, "serverUrl ==>  " + "\nDataway Url:"
+                + datawayUrl + ",clientToken:" + maskToken);
+    }
+
+    /**
+     * Check if upload URL is available
+     *
+     * @return true if datakitUrl or datawayUrl is configured
+     */
+    public boolean isUrlAvailable() {
+        return !Utils.isNullOrEmpty(datakitUrl) || !Utils.isNullOrEmpty(datawayUrl);
     }
 
     /**

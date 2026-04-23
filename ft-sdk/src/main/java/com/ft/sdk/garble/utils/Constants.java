@@ -23,6 +23,11 @@ public class Constants {
     public static final String SYNC_DATA_TRACE_HEADER = "X-Pkg-Id";
 
     /**
+     * Client Timestamp
+     */
+    public static final String SYNC_DATA_DEVICE_TIME = "X-Client-Timestamp";
+
+    /**
      * Data synchronization link propagation header value
      */
     public static final String SYNC_DATA_TRACE_HEADER_FORMAT = "rumm-%s";
@@ -32,6 +37,11 @@ public class Constants {
     public static final String SYNC_DATA_CONTENT_TYPE_HEADER = "Content-Type";
     public static final String SYNC_DATA_USER_AGENT_HEADER = "User-Agent";
     public static final String SYNC_DATA_CONTENT_ENCODING_HEADER = "Content-Encoding";
+
+    /**
+     * Indicates no content encoding transformation is applied
+     */
+    public static final String CONTENT_ENCODING_IDENTITY = "identity";
     public static final String SYNC_DATA_CONTENT_TYPE_VALUE = "text/plain";
     /**
      * Illegal value
@@ -95,11 +105,11 @@ public class Constants {
      */
     public static final String FT_USER_USER_EXT = "ft.user.extdata";
     /**
-     *
+     * Store {@link  android.content.SharedPreferences} {@link #FT_REMOTE_CONFIG} key value
      */
     public static final String FT_REMOTE_CONFIG = "ft.localCache.remoteConfig";
     /**
-     *
+     * Store {@link  android.content.SharedPreferences} {@link #FT_REMOTE_CONFIG_FETCH_TIME} key value
      */
     public static final String FT_REMOTE_CONFIG_FETCH_TIME = "ft.localCache.remoteConfigFetchTime";
     /**
@@ -193,10 +203,6 @@ public class Constants {
 //    public static final String KEY_PAGE_EVENT_USER_NAME = "ud_name";
 
     /**
-     * Duration, unit nanoseconds
-     */
-    public static final String KEY_TIME_COST_DURATION = "duration";
-    /**
      * Log level, {@link com.ft.sdk.garble.bean.Status}
      */
     public static final String KEY_STATUS = "status";
@@ -254,6 +260,8 @@ public class Constants {
      * Current application battery maximum consumption
      */
     public static final String KEY_BATTERY_CURRENT_MAX = "battery_current_max";
+
+    public static final String KEY_HAS_REPLAY = "session_has_replay";
 
     /* <======= Page cycle end */
 
@@ -385,6 +393,11 @@ public class Constants {
     public static final String KEY_RUM_RESOURCE_URL = "resource_url";
 
     /**
+     * Resource relative id
+     */
+    public static final String KEY_RUM_RESOURCE_ID = "resource_id";
+
+    /**
      * Resource request host address
      */
     public static final String KEY_RUM_RESOURCE_URL_HOST = "resource_url_host";
@@ -419,22 +432,41 @@ public class Constants {
     public static final String KEY_RUM_REQUEST_HEADER = "request_header";
 
     /**
+     * Resource http protocol
+     */
+    public static final String KEY_RUM_RESOURCE_HTTP_PROTOCOL = "resource_http_protocol";
+    /**
+     * Resource request size
+     */
+    public static final String KEY_RUM_RESOURCE_REQUEST_SIZE = "resource_request_size";
+    /**
+     * Resource connection reuse
+     */
+    public static final String KEY_RUM_RESOURCE_CONNECTION_REUSE = "resource_connection_reuse";
+
+
+    /**
      * Release version information set
      */
-    public static final String KEY_RUM_SDK_PACKAGE_INFO = "sdk_pkg_info";
+    public static final String KEY_SDK_PACKAGE_INFO = "sdk_pkg_info";
     /**
      * ft-sdk module release version
      */
-    public static final String KEY_RUM_SDK_PACKAGE_AGENT = "agent";
+    public static final String KEY_SDK_PACKAGE_AGENT = "agent";
     /**
      * ft-plugin module release version
      */
-    public static final String KEY_RUM_SDK_PACKAGE_TRACK = "track";
+    public static final String KEY_SDK_PACKAGE_TRACK = "track";
 
     /**
      * ft-native module release version
      */
-    public static final String KEY_RUM_SDK_PACKAGE_NATIVE = "native";
+    public static final String KEY_SDK_PACKAGE_NATIVE = "native";
+
+    /**
+     * ft-session-replay module release version
+     */
+    public static final String KEY_RUM_SDK_PACKAGE_REPLAY = "replay";
 
     /**
      * Web view uses web sdk release version
@@ -452,10 +484,10 @@ public class Constants {
     /**
      * SDK View update time
      */
-    public static final String KEY_SDK_VIEW_UPDATE_TIME = "view_update_time";
+    public static final String KEY_RUM_SDK_VIEW_UPDATE_TIME = "view_update_time";
 
     /**
-     * SDK version number, here is agent version {@link #KEY_RUM_SDK_PACKAGE_AGENT}
+     * SDK version number, here is agent version {@link #KEY_SDK_PACKAGE_AGENT}
      */
     public static final String KEY_SDK_VERSION = "sdk_version";
 
@@ -568,20 +600,25 @@ public class Constants {
      * Data collected from error
      */
 
-    public static final String KEY_SAMPLED_FOR_ERROR_SESSION = "sampled_for_error_session";
+    public static final String KEY_RUM_SAMPLED_FOR_ERROR_SESSION = "sampled_for_error_session";
+
+    /**
+     * Because of Session Replay error collection
+     */
+    public static final String KEY_SAMPLED_FOR_ERROR_REPLAY ="sampled_for_error_replay";
 
     /**
      * Session error time
      */
-    public static final String KEY_SESSION_ERROR_TIMESTAMP = "session_error_timestamp";
+    public static final String KEY_RUM_SESSION_ERROR_TIMESTAMP = "session_error_timestamp";
     /**
      * Session rum sampling rate
      */
-    public static final String KEY_SESSION_SAMPLE_RATE = "session_sample_rate";
+    public static final String KEY_RUM_SESSION_SAMPLE_RATE = "session_sample_rate";
     /**
      * Session error sampling rate
      */
-    public static final String KEY_SESSION_ON_ERROR_SAMPLE_RATE = "session_on_error_sample_rate";
+    public static final String KEY_RUM_SESSION_ON_ERROR_SAMPLE_RATE = "session_on_error_sample_rate";
 
     /**
      * Session type
@@ -655,6 +692,24 @@ public class Constants {
     public static final String KEY_RUM_ACTION_TYPE = "action_type";
 
     /**
+     * Pre-application initialization time, JSON format: {"start": 0, "duration": applicationPreOnCreateDuration}
+     * Represents the time from app start to Application.onCreate()
+     */
+    public static final String KEY_RUM_APP_PRE_APPLICATION_INIT_TIME="app_pre_application_init_time";
+
+    /**
+     * Application initialization time, JSON format: {"start": applicationOnCreateRelativeTime, "duration": applicationOnCreateDuration}
+     * Represents the time from Application.onCreate() to first Activity preOnCreate()
+     */
+    public static final String KEY_RUM_APP_APPLICATION_INIT_TIME="app_application_init_time";
+
+    /**
+     * First frame initialization time, JSON format: {"start": firstActivityPreOnActivityRelativeTime, "duration": firsDrawnDuration}
+     * Represents the time from first Activity preOnCreate() to first frame drawn
+     */
+    public static final String KEY_RUM_APP_FIRST_FRAME_INIT_TIME ="app_first_frame_init_time";
+
+    /**
      * Action cycle content long duration count statistics, {@link Constants#FT_MEASUREMENT_RUM_LONG_TASK}
      */
     public static final String KEY_RUM_ACTION_LONG_TASK_COUNT = "action_long_task_count";
@@ -675,18 +730,24 @@ public class Constants {
     /**
      * Line protocol data, additional attributes
      */
-    public static final String KEY_RUM_PROPERTY = "property";
+    public static final String KEY_RUM_SDK_INNER_KEY_PROPERTY = "property";
 
     /**
      * Line protocol data tags, temporarily store dynamic tags
      */
-    public static final String KEY_RUM_TAGS = "tags";
+    public static final String KEY_RUM_SDK_INNER_KEY_TAGS = "tags";
 
 
     /**
      * Collected according to sampling rate
      */
-    public static final String KEY_COLLECT_TYPE = "collect_type";
+    public static final String KEY_RUM_SDK_INNER_KEY_COLLECT_TYPE = "collect_type";
+
+    /**
+     *
+     */
+    public static final String KEY_RUM_SDK_INNER_KEY_START_TIME_NANO = "start_time_nano";
+
 
     /**
      * Cold start, action_type

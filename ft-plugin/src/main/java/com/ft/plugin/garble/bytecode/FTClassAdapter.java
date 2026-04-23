@@ -39,22 +39,50 @@ import java.util.List;
  * SensorsAnalyticsClassVisitor.groovy class
  */
 public class FTClassAdapter extends ClassVisitor {
+    private static final List<String> knownWebviews = new ArrayList<>();
+
+    static {
+        // Initialize known WebView classes
+        knownWebviews.add(Constants.CLASS_NAME_WEBVIEW);
+        knownWebviews.add(Constants.CLASS_NAME_RN_WEBVIEW);
+        knownWebviews.add(Constants.CLASS_NAME_TENCENT_WEBVIEW);
+        knownWebviews.add(Constants.CLASS_NAME_TAOBAO_WEBVIEW);
+        knownWebviews.add(Constants.CLASS_NAME_DCLOUD_WEBVIEW);
+    }
+
     private String className;
     private String superName;
     private String[] interfaces;
     private final List<String> ignorePackages;
+    private final boolean verboseLog;
     /**
      * Whether to skip
      */
     private boolean needSkip;
 
-    public FTClassAdapter(final ClassVisitor cv, int api, List<String> ignorePackages) {
+    public FTClassAdapter(final ClassVisitor cv, int api, List<String> ignorePackages,
+                          boolean verboseLog, List<String> additionalWebviews) {
         super(api, cv);
-        this.ignorePackages = ignorePackages == null ? new ArrayList<>() : ignorePackages;
+        // Convert dot notation to slash notation for ignorePackages
+        this.ignorePackages = new ArrayList<>();
+        if (ignorePackages != null) {
+            for (String packageName : ignorePackages) {
+                this.ignorePackages.add(packageName.replace(".", "/"));
+            }
+        }
+        this.verboseLog = verboseLog;
+
+        // Add additional WebViews to the static knownWebviews list
+        if (additionalWebviews != null) {
+            for (String webview : additionalWebviews) {
+                addToKnownWebviews(webview.replace(".", "/"));
+            }
+        }
     }
 
     @Override
-    public void visit(int version, int access, String name, String signature, String superName, String[] interfaces) {
+    public void visit(int version, int access, String name, String signature, String superName,
+                      String[] interfaces) {
         super.visit(version, access, name, signature, superName, interfaces);
         this.className = name;
         this.superName = superName;
@@ -127,25 +155,85 @@ public class FTClassAdapter extends ClassVisitor {
                 return mv;
             }
         }
-        return new FTMethodAdapter(mv, access, name, desc, className, interfaces, superName, api);
+        return new FTMethodAdapter(mv, access, name, desc, className, interfaces, superName, api, verboseLog, knownWebviews);
     }
 
     /**
-     * ignorePackages corresponds to the packages or class names to be ignored
+     * Check if the class should be ignored based on ignorePackages patterns.
+     * Supports Ant-style wildcard patterns:
+     * - * matches a single package level (no slashes)
+     * - ** matches zero or more package levels
      *
-     * @param className
-     * @return
+     * @param className the class name to check (using slash notation)
+     * @return true if the class should be ignored
      */
     private boolean isIgnorePackage(String className) {
-        boolean isPackageIgnore = false;
-        for (String packageName : ignorePackages) {
-            if (className.startsWith(packageName.replace(".", "/"))) {
-                isPackageIgnore = true;
-                break;
+        for (String pattern : ignorePackages) {
+            if (pattern.contains("*")) {
+                String regex = escapeRegexAndConvertWildcard(pattern);
+                if (className.matches(regex)) {
+                    return true;
+                }
+            } else if (pattern.equals(className)) {
+                return true;
             }
         }
-        return isPackageIgnore;
+        return false;
     }
+
+    /**
+     * Convert Ant-style wildcard pattern to regex.
+     * - ** matches any characters (including slashes)
+     * - * matches any characters except slashes
+     *
+     * @param pattern the Ant-style pattern
+     * @return the regex pattern
+     */
+    private String escapeRegexAndConvertWildcard(String pattern) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < pattern.length(); i++) {
+            char c = pattern.charAt(i);
+            if (c == '*') {
+                if (i + 1 < pattern.length() && pattern.charAt(i + 1) == '*') {
+                    sb.append(".*");
+                    i++;
+                } else {
+                    sb.append("[^/]*");
+                }
+            } else if (isRegexMetaChar(c)) {
+                sb.append('\\').append(c);
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Check if a character is a regex meta character that needs escaping.
+     *
+     * @param c the character to check
+     * @return true if the character is a regex meta character
+     */
+    private boolean isRegexMetaChar(char c) {
+        return ".^$+?()[]{}|\\".indexOf(c) >= 0;
+    }
+
+
+    private static boolean isKnownWebviews(String className) {
+        return knownWebviews.contains(className);
+    }
+
+    /**
+     * Add class name to knownWebviews if not null and not already present
+     */
+    private static void addToKnownWebviews(String className) {
+        if (className != null && !knownWebviews.contains(className)) {
+            Logger.debug("addToKnownWebviews:" + className);
+            knownWebviews.add(className);
+        }
+    }
+
 
     /**
      * SDK internal methods, except for {@link Constants#FT_SDK_PACKAGE}, do not need to be scanned
@@ -161,6 +249,7 @@ public class FTClassAdapter extends ClassVisitor {
 
     /**
      * Whether it is a third-party or internal WebView method
+     * Uses hybrid inheritance checking strategy that doesn't depend on compilation order
      *
      * @param className
      * @param superName
@@ -168,11 +257,26 @@ public class FTClassAdapter extends ClassVisitor {
      * @return
      */
     private boolean isWebViewInner(String className, String superName, String methodNameDesc) {
-        return (ClassNameAnalytics.isDCloud(className)
-                || ClassNameAnalytics.isTencent(className)
-                || ClassNameAnalytics.isTaoBao(className)
-                || superName.equals(Constants.CLASS_NAME_WEBVIEW))
-                && TARGET_WEBVIEW_METHOD.contains(methodNameDesc);
+        // Check if it's a WebView method that should be processed first
+        boolean isWebViewMethod = TARGET_WEBVIEW_METHOD.contains(methodNameDesc);
+        if (!isWebViewMethod) {
+            return false; // Early return if not a WebView method
+        }
+
+        // Check if it's already a known WebView
+        boolean isClassNameKnown = isKnownWebviews(className);
+        boolean isSuperNameKnown = isKnownWebviews(superName);
+
+        if (isClassNameKnown) {
+            return true; // Early return if className is already known
+        }
+
+        // If superName is a known WebView but className is not collected, add className to known list
+        if (isSuperNameKnown) {
+            addToKnownWebviews(className);
+            return true;
+        }
+        return false;
     }
 
 }

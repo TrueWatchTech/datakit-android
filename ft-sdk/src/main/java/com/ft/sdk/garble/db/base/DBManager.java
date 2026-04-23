@@ -9,28 +9,46 @@ import com.ft.sdk.garble.utils.Constants;
 import com.ft.sdk.garble.utils.LogUtils;
 
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * BY huangDianHua
  * DATE:2019-12-02 11:23
  * Description: Database management, get database objects and data shutdown
+ * <p>
+ * Improved version: Uses granular locking strategy and better connection management
+ * API 21 compatible version
  */
 public abstract class DBManager {
 
     private static final String TAG = Constants.LOG_TAG_PREFIX + "DBManager";
     private SQLiteOpenHelper databaseHelper;
     private static final int TRANSACTION_LIMIT_COUNT = 10;
-    private final Object lock = new Object();
-    private int openCounter = 0;
-    private long lastUsedTime = 0; // Last active time
+
+    // Use separate locks for different operations to reduce contention
+    private final Object writeLock = new Object(); // For write operations
+    private final Object dbLock = new Object();    // For database lifecycle operations
+
+    // Connection pool management
+    private final AtomicInteger openCounter = new AtomicInteger(0);
+    private final AtomicLong lastUsedTime = new AtomicLong(0);
     private static final long IDLE_TIMEOUT = 20_000;// 20 seconds
+    private static final long DB_SIZE_CHECK_INTERVAL = 10_000; // Database size check interval: 10 seconds
+    private long lastDbSizeCheckTime = 0;
+
     private ScheduledFuture<?> pendingCloseTask;
+
+    // Database size cache
+    private long pageSize = 0;
 
     protected abstract SQLiteOpenHelper initDataBaseHelper();
 
     SQLiteOpenHelper getDataBaseHelper() {
-        if (databaseHelper == null) {
-            databaseHelper = initDataBaseHelper();
+        synchronized (dbLock) {
+            if (databaseHelper == null) {
+                databaseHelper = initDataBaseHelper();
+            }
         }
         return databaseHelper;
     }
@@ -41,67 +59,90 @@ public abstract class DBManager {
      * @param write
      * @param callBack
      */
-    protected void getDB(boolean write, DataBaseCallBack callBack) {
+    public void getDB(boolean write, DataBaseCallBack callBack) {
         getDB(write, 1, callBack);
     }
 
     /**
-     * Synchronization lock to make database operations thread-safe
+     * Improved version: Uses granular locking strategy to reduce contention
      *
      * @param write
      * @param operationCount Whether to enable transactions
      * @param callback
      */
-    protected void getDB(boolean write, int operationCount, DataBaseCallBack callback) {
-
-        SQLiteDatabase db = null;
-        SQLiteOpenHelper helper;
+    public void getDB(boolean write, int operationCount, DataBaseCallBack callback) {
         try {
-            synchronized (lock) {
-                helper = getDataBaseHelper();
-            }
-            db = write ? helper.getWritableDatabase() : helper.getReadableDatabase();
-            if (db.isOpen()) {
+            // Get database connection
+            SQLiteOpenHelper helper = getDataBaseHelper();
+            SQLiteDatabase db = write ? helper.getWritableDatabase() : helper.getReadableDatabase();
+
+            if (db != null && db.isOpen()) {
                 acquire();
-                // Automatic judgment: use transactions when write operations and 
-                // operation count is greater than threshold (default 10)
-                boolean useTransaction = write && operationCount > TRANSACTION_LIMIT_COUNT;
-                if (useTransaction && !db.inTransaction()) {
-                    db.beginTransaction();
-                    try {
-                        synchronized (lock) {
-                            callback.run(db);
-                        }
-                        if (db.inTransaction()) {
-                            db.setTransactionSuccessful();
-                        }
-                    } finally {
-                        if (db.inTransaction()) {
-                            db.endTransaction();
-                        }
+
+                // Use different locking strategies based on operation type
+                if (write) {
+                    // Write operations use write lock
+                    synchronized (writeLock) {
+                        executeWriteOperation(db, operationCount, callback);
                     }
                 } else {
-                    if (write) {
-                        synchronized (lock) {
-                            callback.run(db);
-                        }
-                    } else {
-                        callback.run(db);
-                    }
+                    // Read operations use read lock (allows concurrent reads)
+                    executeReadOperation(db, callback);
                 }
-                if (write) {
+
+                // Optimize database size check frequency
+                if (write && shouldCheckDatabaseSize()) {
                     checkDatabaseSize(db);
                 }
             }
         } catch (Exception e) {
-            LogUtils.e(TAG, LogUtils.getStackTraceString(e));
+            LogUtils.e(TAG, "Database operation failed: " + e.getMessage());
         } finally {
             tryToClose();
         }
     }
 
-    private long pageSize = 0;
+    /**
+     * Execute write operation with transaction support
+     */
+    private void executeWriteOperation(SQLiteDatabase db, int operationCount, DataBaseCallBack callback) {
+        boolean useTransaction = operationCount > TRANSACTION_LIMIT_COUNT;
 
+        if (useTransaction && !db.inTransaction()) {
+            db.beginTransaction();
+            try {
+                callback.run(db);
+                if (db.inTransaction()) {
+                    db.setTransactionSuccessful();
+                }
+            } finally {
+                if (db.inTransaction()) {
+                    db.endTransaction();
+                }
+            }
+        } else {
+            callback.run(db);
+        }
+    }
+
+    /**
+     * Execute read operation
+     */
+    private void executeReadOperation(SQLiteDatabase db, DataBaseCallBack callback) {
+        callback.run(db);
+    }
+
+    /**
+     * Determine if database size check is needed
+     */
+    private boolean shouldCheckDatabaseSize() {
+        long currentTime = System.currentTimeMillis();
+        if (currentTime - lastDbSizeCheckTime > DB_SIZE_CHECK_INTERVAL) {
+            lastDbSizeCheckTime = currentTime;
+            return true;
+        }
+        return false;
+    }
 
     /**
      * Calculate the current db size by getting page_size * page_count through PRAGMA
@@ -139,27 +180,15 @@ public abstract class DBManager {
         }
     }
 
-    /**
-     * Whether to enable db limit
-     *
-     * @return
-     */
     protected abstract boolean enableDBSizeLimit();
 
-
-    /**
-     * Notify db to calculate size
-     *
-     * @param db
-     * @param reachLimit
-     */
     protected abstract void onDBSizeCacheChange(SQLiteDatabase db, long reachLimit);
 
     /**
      * Close db
      */
     private void closeDB() {
-        synchronized (lock) {
+        synchronized (dbLock) {
             if (databaseHelper != null) {
                 databaseHelper.close();
                 LogUtils.d(TAG, "DB close");
@@ -171,10 +200,13 @@ public abstract class DBManager {
      * Establish db connection
      */
     public void acquire() {
-        synchronized (lock) {
-            openCounter++;
-            lastUsedTime = System.currentTimeMillis();
-            cancelPendingClose();
+        openCounter.incrementAndGet();
+        lastUsedTime.set(System.currentTimeMillis());
+        cancelPendingClose();
+
+        if (openCounter.get() > 10) {
+            LogUtils.w(TAG, "High connection count: " + openCounter.get() +
+                    ", Thread: " + Thread.currentThread().getName());
         }
     }
 
@@ -183,20 +215,16 @@ public abstract class DBManager {
      */
     private void scheduleCloseIfIdle() {
         cancelPendingClose();
-        if (openCounter == 0) {
+        if (openCounter.get() == 0) {
             pendingCloseTask = DBScheduleThreadPool.get().schedule(new Runnable() {
                 @Override
                 public void run() {
-                    synchronized (lock) {
-                        if (openCounter == 0 && (System.currentTimeMillis() - lastUsedTime) >= IDLE_TIMEOUT) {
-                            closeDB();
-                        }
+                    if (openCounter.get() == 0 && (System.currentTimeMillis() - lastUsedTime.get()) >= IDLE_TIMEOUT) {
+                        closeDB();
                     }
                 }
-
             }, IDLE_TIMEOUT);
         }
-        // For example, close after 10 seconds of no operation
     }
 
     /**
@@ -213,21 +241,18 @@ public abstract class DBManager {
      * Try to close database
      */
     public void tryToClose() {
-        synchronized (lock) {
-            if (DBScheduleThreadPool.get().poolRunning()) {
-                openCounter = Math.max(0, openCounter - 1);
-                lastUsedTime = System.currentTimeMillis();
-                scheduleCloseIfIdle();
-            }
-        }
+        openCounter.set(Math.max(0, openCounter.get() - 1));
+        lastUsedTime.set(System.currentTimeMillis());
+        scheduleCloseIfIdle();
     }
 
     /**
      * Close and release database file objects
      */
     protected void shutDown() {
-        synchronized (lock) {
+        synchronized (dbLock) {
             cancelPendingClose();
+            openCounter.set(0);
             DBScheduleThreadPool.get().execute(new Runnable() {
                 @Override
                 public void run() {
@@ -238,4 +263,5 @@ public abstract class DBManager {
             });
         }
     }
+
 }
