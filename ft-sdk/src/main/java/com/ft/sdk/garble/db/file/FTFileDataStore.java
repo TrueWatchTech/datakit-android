@@ -12,8 +12,11 @@ import com.ft.sdk.garble.bean.ViewBean;
 import com.ft.sdk.garble.db.FTDBCachePolicy;
 import com.ft.sdk.garble.db.FTDBManager;
 import com.ft.sdk.garble.db.FTDataStore;
+import com.ft.sdk.garble.db.HistoricalRumDataStore;
+import com.ft.sdk.garble.db.InsertResult;
 import com.ft.sdk.garble.utils.Constants;
 import com.ft.sdk.garble.utils.LogUtils;
+import com.ft.sdk.internal.anr.historical.HistoricalAnrDataId;
 
 import java.io.File;
 import java.io.IOException;
@@ -23,7 +26,7 @@ import java.util.List;
 /**
  * File-backed SDK data store.
  */
-public class FTFileDataStore implements FTDataStore {
+public class FTFileDataStore implements FTDataStore, HistoricalRumDataStore {
     private static final String TAG = Constants.LOG_TAG_PREFIX + "FTFileDataStore";
     private static final String DB_FLAT_MIGRATION_MARKER = "db_flat_migrated";
 
@@ -213,6 +216,36 @@ public class FTFileDataStore implements FTDataStore {
     }
 
     @Override
+    public InsertResult prepareHistoricalRum(@NonNull String dedupeKey,
+                                             @NonNull String viewId,
+                                             @NonNull SyncData data) {
+        if (!HistoricalAnrDataId.canonicalize(dedupeKey, data)) {
+            return InsertResult.FAILED;
+        }
+        InsertResult insertResult = syncStore.prepareHistoricalRum(dedupeKey, data);
+        if (insertResult == InsertResult.FAILED) {
+            return InsertResult.FAILED;
+        }
+        InsertResult countResult = rumStore.increaseViewErrorOnce(viewId, dedupeKey);
+        updateFileSizeCache();
+        return countResult == InsertResult.FAILED ? InsertResult.FAILED : insertResult;
+    }
+
+    @Override
+    public InsertResult commitHistoricalRum(@NonNull String dedupeKey,
+                                            @NonNull DataType committedType) {
+        String uuid = HistoricalAnrDataId.fromDedupeKey(dedupeKey);
+        if (uuid == null) {
+            return InsertResult.FAILED;
+        }
+        InsertResult result = syncStore.commitHistoricalRum(uuid, committedType);
+        if (result != InsertResult.FAILED) {
+            updateFileSizeCache();
+        }
+        return result;
+    }
+
+    @Override
     public boolean insertFtOptList(@NonNull List<SyncData> dataList, boolean reInsert) {
         boolean result = syncStore.insertFtOptList(dataList, reInsert);
         updateFileSizeCache();
@@ -297,6 +330,7 @@ public class FTFileDataStore implements FTDataStore {
     public void delete() {
         syncStore.deleteAll();
         rumStore.deleteAll();
+        new FTHistoricalFileStore(paths).deleteAll();
         updateFileSizeCache();
     }
 

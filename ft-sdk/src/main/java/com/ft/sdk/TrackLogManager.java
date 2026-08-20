@@ -100,12 +100,28 @@ public class TrackLogManager {
             return false;
         }
 
+        if (!isLogEnabledForSource(config, logBean)) {
+            return false;
+        }
+
+        String nativeApplicationId = null;
+        String nativeSessionId = null;
+        if (isWebViewLog(logBean)
+                && config.isEnableLinkRumData()
+                && FTWebViewHandler.isRumWebViewEnabled(
+                FTRUMConfigManager.get().getConfig())) {
+            nativeApplicationId = FTRUMInnerManager.get().getApplicationID();
+            nativeSessionId = FTRUMInnerManager.get().getSessionId();
+        }
+        applyWebViewRumLinkConfiguration(
+                config, logBean, nativeApplicationId, nativeSessionId);
+
         if (!Utils.enableTraceSamplingRate(config.getSamplingRate())) {
             LogUtils.w(TAG, "Log discarded by sampling rate: " + logBean.getContent());
             return false;
         }
 
-        if (config.isEnableLinkRumData()) {
+        if (shouldAttachNativeRumData(config, logBean)) {
             HashMap<String, Object> rumTags = FTRUMConfigManager.get().getRUMPublicDynamicTags();
             HashMap<String, Object> fields = new HashMap<>();
             FTRUMInnerManager.get().attachRUMRelative(rumTags, fields, false);
@@ -114,6 +130,34 @@ public class TrackLogManager {
         }
 
         return true;
+    }
+
+    static boolean isLogEnabledForSource(FTLoggerConfig config, LogBean logBean) {
+        return !isWebViewLog(logBean)
+                || (config.isEnableWebViewLog() && config.checkLogLevel(logBean.getStatus()));
+    }
+
+    static boolean shouldAttachNativeRumData(FTLoggerConfig config, LogBean logBean) {
+        return config.isEnableLinkRumData() && !isWebViewLog(logBean);
+    }
+
+    static void applyWebViewRumLinkConfiguration(FTLoggerConfig config, LogBean logBean,
+                                                 String nativeApplicationId,
+                                                 String nativeSessionId) {
+        if (!isWebViewLog(logBean)) {
+            return;
+        }
+        if (!config.isEnableLinkRumData()) {
+            WebViewLogEventMapper.removeRumLinkData(logBean);
+        } else {
+            WebViewLogEventMapper.replaceRumLinkData(
+                    logBean, nativeApplicationId, nativeSessionId);
+        }
+    }
+
+    private static boolean isWebViewLog(LogBean logBean) {
+        return Boolean.TRUE.equals(
+                logBean.getTags().get(Constants.KEY_RUM_VIEW_IS_WEB_VIEW));
     }
 
     private void triggerProcessing(boolean isSilence) {

@@ -1,7 +1,10 @@
 package com.ft.sdk;
 
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+
+import androidx.annotation.RestrictTo;
 
 import com.ft.sdk.garble.bean.ActionBean;
 import com.ft.sdk.garble.bean.ActiveActionBean;
@@ -25,6 +28,9 @@ import com.ft.sdk.garble.utils.DeviceUtils;
 import com.ft.sdk.garble.utils.HashMapUtils;
 import com.ft.sdk.garble.utils.LogUtils;
 import com.ft.sdk.garble.utils.Utils;
+import com.ft.sdk.internal.anr.historical.FileHistoricalRumContextStore;
+import com.ft.sdk.internal.anr.historical.ProcessRunIdentity;
+import com.ft.sdk.internal.issue.FTIssueFieldEnricher;
 
 import org.json.JSONException;
 
@@ -84,6 +90,7 @@ public class FTRUMInnerManager {
      */
     private String sessionId = Utils.getEmptyUUID();
     private String rumAppId;
+    private boolean persistHistoricalAnrContext;
 
     /**
      * Do not collect
@@ -140,6 +147,8 @@ public class FTRUMInnerManager {
      * Error session sampling rate
      */
     private float sessionErrorSampleError = 1f;
+
+    private FTIssueFieldEnricher issueFieldEnricher = new FTIssueFieldEnricher(null);
 
     String getSessionId() {
         return sessionId;
@@ -800,6 +809,12 @@ public class FTRUMInnerManager {
     }
 
     private void createNewView(ActiveViewBean newView, HashMap<String, Object> property, boolean enableMonitor) {
+        ProcessRunIdentity processIdentity = ProcessRunIdentity.get();
+        if (processIdentity != null) {
+            newView.setProcessName(processIdentity.getProcessName());
+            newView.setProcessRunId(processIdentity.getProcessRunId());
+            newView.setProcessStartMs(processIdentity.getProcessStartMs());
+        }
         if (property != null) {
             newView.getProperty().putAll(property);
         }
@@ -823,6 +838,10 @@ public class FTRUMInnerManager {
         EventConsumerThreadPool.get().execute(new Runnable() {
             @Override
             public void run() {
+                if (persistHistoricalAnrContext) {
+                    FileHistoricalRumContextStore.get(
+                            FTApplication.getApplication()).save(bean);
+                }
                 FTDataStoreManager.get().initSumView(bean);
             }
         });
@@ -922,9 +941,80 @@ public class FTRUMInnerManager {
      */
     public void addError(String log, String message, long dateline, String errorType,
                          AppState state, HashMap<String, Object> property, RunnerCompleteCallBack callBack) {
+        addErrorInternal(log, message, dateline, errorType, state, property, callBack,
+                new HashMap<String, Object>());
+    }
+
+    /**
+     * Internal seam for automatically collected crash and ANR Errors.
+     */
+    void addAutomaticIssue(String log,
+                           String message,
+                           long dateline,
+                           FTIssueCategory category,
+                           String errorType,
+                           AppState state,
+                           boolean historical,
+                           String threadName,
+                           HashMap<String, Object> property,
+                           RunnerCompleteCallBack callBack) {
+        FTIssueInfo issue = new FTIssueInfo(
+                category,
+                errorType,
+                message,
+                log == null ? "" : log,
+                dateline,
+                state.toString(),
+                threadName,
+                historical);
+        HashMap<String, Object> additionalFields =
+                issueFieldEnricher.provideAdditionalFields(issue);
+        addErrorInternal(log, message, dateline, errorType, state, property, callBack,
+                additionalFields);
+    }
+
+    /**
+     * Enriches an ApplicationExitInfo ANR without attaching current-process RUM context.
+     */
+    @RestrictTo(RestrictTo.Scope.LIBRARY)
+    public void enrichHistoricalAnrFields(String stack,
+                                          long dateline,
+                                          AppState state,
+                                          HashMap<String, Object> tags,
+                                          HashMap<String, Object> fields) {
+        FTIssueInfo issue = createHistoricalAnrIssueInfo(stack, dateline, state);
+        HashMap<String, Object> additionalFields =
+                issueFieldEnricher.provideAdditionalFields(issue);
+        issueFieldEnricher.mergeAdditionalFields(additionalFields, tags, fields,
+                FTTrackInner.getInstance().getRUMReservedKeys());
+    }
+
+    static FTIssueInfo createHistoricalAnrIssueInfo(String stack,
+                                                    long dateline,
+                                                    AppState state) {
+        return new FTIssueInfo(
+                FTIssueCategory.ANR,
+                ErrorType.ANR_CRASH.toString(),
+                "android_anr",
+                stack == null ? "" : stack,
+                dateline,
+                state.toString(),
+                null,
+                true);
+    }
+
+    private void addErrorInternal(String log,
+                                  String message,
+                                  long dateline,
+                                  String errorType,
+                                  AppState state,
+                                  HashMap<String, Object> property,
+                                  RunnerCompleteCallBack callBack,
+                                  final HashMap<String, Object> additionalFields) {
 
         try {
-            boolean isPreCrash = property != null && property.get(FTExceptionHandler.IS_PRE_CRASH) == (Boolean) true;
+            boolean isPreCrash = property != null
+                    && Boolean.TRUE.equals(property.get(FTExceptionHandler.IS_PRE_CRASH));
             boolean isCrashError = ErrorType.JAVA.toString().equals(errorType)
                     || ErrorType.NATIVE.toString().equals(errorType)
                     || ErrorType.ANR_CRASH.toString().equals(errorType);
@@ -984,6 +1074,8 @@ public class FTRUMInnerManager {
 
                         }
                         //<--------
+                        issueFieldEnricher.mergeAdditionalFields(additionalFields, tags, fields,
+                                FTTrackInner.getInstance().getRUMReservedKeys());
                         FTTrackInner.getInstance().rum(dateline, Constants.FT_MEASUREMENT_RUM_ERROR, tags, fields,
                                 new RunnerCompleteCallBack() {
                                     @Override
@@ -1133,6 +1225,14 @@ public class FTRUMInnerManager {
             tags.put(Constants.KEY_RUM_RESOURCE_URL_HOST, bean.urlHost);
 
             tags.put(Constants.KEY_RUM_RESOURCE_TYPE, bean.resourceType);
+            if (!Utils.isNullOrEmpty(bean.resourceWebSocketCollectionLevel)) {
+                tags.put(Constants.KEY_RUM_RESOURCE_WEBSOCKET_COLLECTION_LEVEL,
+                        bean.resourceWebSocketCollectionLevel);
+            }
+            if (!Utils.isNullOrEmpty(bean.resourceWebSocketHandshakeState)) {
+                tags.put(Constants.KEY_RUM_RESOURCE_WEBSOCKET_HANDSHAKE_STATE,
+                        bean.resourceWebSocketHandshakeState);
+            }
             tags.put(Constants.KEY_RUM_RESPONSE_CONNECTION, bean.responseConnection);
             tags.put(Constants.KEY_RUM_RESPONSE_CONTENT_TYPE, bean.responseContentType);
             tags.put(Constants.KEY_RUM_RESPONSE_CONTENT_ENCODING, bean.responseContentEncoding);
@@ -1154,7 +1254,7 @@ public class FTRUMInnerManager {
 
             long resourceSize = bean.resourceResponseBodySize + (bean.responseHeader == null ?
                     0 : bean.responseHeader.length());
-            if (resourceSize > 0) {
+            if (bean.enableResourceSize && resourceSize > 0) {
                 fields.put(Constants.KEY_RUM_RESOURCE_SIZE, resourceSize);
             }
 
@@ -1254,7 +1354,8 @@ public class FTRUMInnerManager {
             long time = Utils.getCurrentNanoTime();
 
             if (bean.resourceStatus >= HttpsURLConnection.HTTP_BAD_REQUEST
-                    || (bean.resourceStatus == 0 && !Utils.isNullOrEmpty(bean.errorStack))) {
+                    || ((bean.resourceStatus == 0 || bean.forceNetworkError)
+                    && !Utils.isNullOrEmpty(bean.errorStack))) {
                 SyncTaskManager.get().setErrorTimeLine(time, activeView);
 
                 HashMap<String, Object> errorTags = FTRUMConfigManager.get().getRUMPublicDynamicTags();
@@ -1277,6 +1378,15 @@ public class FTRUMInnerManager {
                 errorTags.put(Constants.KEY_RUM_RESOURCE_URL, bean.url);
                 errorTags.put(Constants.KEY_RUM_RESOURCE_URL_HOST, bean.urlHost);
                 errorTags.put(Constants.KEY_RUM_RESOURCE_METHOD, bean.resourceMethod);
+                if (!Utils.isNullOrEmpty(bean.resourceWebSocketCollectionLevel)) {
+                    errorTags.put(Constants.KEY_RUM_RESOURCE_TYPE, bean.resourceType);
+                    errorTags.put(Constants.KEY_RUM_RESOURCE_WEBSOCKET_COLLECTION_LEVEL,
+                            bean.resourceWebSocketCollectionLevel);
+                }
+                if (!Utils.isNullOrEmpty(bean.resourceWebSocketHandshakeState)) {
+                    errorTags.put(Constants.KEY_RUM_RESOURCE_WEBSOCKET_HANDSHAKE_STATE,
+                            bean.resourceWebSocketHandshakeState);
+                }
 
                 if (!urlPath.isEmpty()) {
                     errorTags.put(Constants.KEY_RUM_RESOURCE_URL_PATH, urlPath);
@@ -1374,11 +1484,18 @@ public class FTRUMInnerManager {
         bean.resourceMethod = params.resourceMethod;
         bean.resourceProtocol = params.resourceProtocol;
         bean.responseContentEncoding = params.responseContentEncoding;
-        bean.resourceType = ResourceType.fromMimeType(params.responseContentType).getValue();
+        bean.resourceType = Utils.isNullOrEmpty(params.resourceType)
+                ? ResourceType.fromMimeType(params.responseContentType).getValue()
+                : params.resourceType;
+        bean.resourceWebSocketCollectionLevel = params.resourceWebSocketCollectionLevel;
+        bean.resourceWebSocketHandshakeState = params.resourceWebSocketHandshakeState;
+        bean.enableResourceSize = params.enableResourceSize;
+        bean.forceNetworkError = params.forceNetworkError;
         bean.resourceStatus = params.resourceStatus;
         if (bean.resourceStatus >= HttpsURLConnection.HTTP_BAD_REQUEST) {
             bean.errorStack = params.responseBody == null ? "" : params.responseBody;
-        } else if (bean.resourceStatus == 0 && !Utils.isNullOrEmpty(params.requestErrorStack)) {
+        } else if ((bean.resourceStatus == 0 || bean.forceNetworkError)
+                && !Utils.isNullOrEmpty(params.requestErrorStack)) {
             bean.errorStack = params.requestErrorStack;
             bean.errorMsg = params.requestErrorMsg;
         }
@@ -1476,6 +1593,10 @@ public class FTRUMInnerManager {
         EventConsumerThreadPool.get().execute(new Runnable() {
             @Override
             public void run() {
+                if (persistHistoricalAnrContext) {
+                    FileHistoricalRumContextStore.get(
+                            FTApplication.getApplication()).save(viewBean);
+                }
                 FTDataStoreManager.get().closeView(viewId, loadTIme, timeSpent, viewBean.getAttrJsonString());
                 FTDataStoreManager.get().updateViewUpdateTime(viewId, System.currentTimeMillis());
                 if (callBack != null) {
@@ -1798,17 +1919,22 @@ public class FTRUMInnerManager {
     void initParams(FTRUMConfig config) {
         sampleRate = config.getSamplingRate();
         rumAppId = config.getRumAppId();
+        persistHistoricalAnrContext = config.isEnableTrackAppANR()
+                && ANRStrategy.shouldUseHistoricalAnr(Build.VERSION.SDK_INT);
         sessionErrorSampleError = config.getSessionErrorSampleRate();
+        issueFieldEnricher = new FTIssueFieldEnricher(config.getIssueDataProvider());
         sessionId = Utils.randomUUID();
         syntheticViewMap.clear();
         checkSessionKeep(sessionId, sampleRate, sessionErrorSampleError);
+    }
+
+    void closePreviousProcessRumData() {
         EventConsumerThreadPool.get().execute(new Runnable() {
             @Override
             public void run() {
                 FTDataStoreManager.get().closeAllActionAndView();
             }
         });
-
     }
 
     void updateWebviewContainerProperty(String viewId, Map<String, Object> map) {
@@ -1936,6 +2062,7 @@ public class FTRUMInnerManager {
         resourceBeanMap.clear();
         viewList.clear();
         syntheticViewMap.clear();
+        issueFieldEnricher = new FTIssueFieldEnricher(null);
     }
 
     /**

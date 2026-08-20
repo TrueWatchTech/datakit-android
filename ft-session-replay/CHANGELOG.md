@@ -1,7 +1,22 @@
+# replay 0.1.8
+1. Added the RUM `globalContext` values selected by `FTSessionReplayConfig.enableLinkRUMKeys(...)` to Session Replay resource existence checks and uploads, and scoped resource caching, deduplication, existence checks, and uploads by `wgt_id` to preserve routing between WGT applications.
+2. Changed `SessionReplayResourceUploadCallback.onCheckFilesExist(...)` and `onUploadFiles(...)` to include a `Map<String, Object> globalContext` parameter. Custom implementations must update both callback methods and forward the context as request tags.
+3. Fixed a memory leak where Session Replay retained WebViews and Activities after replay stopped.
+
+---
+# replay 0.1.8-beta01
+1. Same as version 0.1.8-alpha01.
+
+---
+# replay 0.1.8-alpha01
+1. Added the RUM `globalContext` values selected by `FTSessionReplayConfig.enableLinkRUMKeys(...)` to Session Replay resource existence checks and uploads, preserving the linked RUM context in resource requests.
+2. Added `SlotIdWebviewBinder.unbind(String)` and `SlotIdWebviewBinder.unbind(long)`, and fixed a WebView memory leak caused by stale slot bindings retained after Session Replay stopped.
+
+---
 # replay 0.1.7
-1. Added `Wireframe.getPermanentId()` and `Wireframe.setPermanentId(String)` for experimental Android Heatmap element association; requires `ft-sdk >= 1.7.4`.
+1. Added Session Replay element association for the experimental Android Heatmap; requires `ft-sdk >= 1.7.4`.
 2. Fixed pointer IDs and coordinates for multi-touch and cancelled gestures.
-3. Fixed locale-sensitive `TouchPrivacy` parsing.
+3. Fixed touch privacy overrides set through `PrivacyOverrideExtensions.setSessionReplayTouchPrivacy(View, TouchPrivacy)` not taking effect under locale-sensitive case conversion, such as Turkish.
 
 ---
 # replay 0.1.7-beta01

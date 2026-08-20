@@ -14,10 +14,14 @@ import com.ft.sdk.internal.exception.FTInvalidParameterException;
 
 import org.json.JSONObject;
 
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Data assembly class, serializes collected data from stored data to line protocol data
@@ -40,6 +44,8 @@ public class SyncDataHelper {
     private final HashMap<String, Object> dynamicLRumTags;
     private final HashMap<String, Object> rumStaticFields;
 
+    private final Set<String> rumReservedKeys;
+
     protected FTSDKConfig config;
     private FTLoggerConfig logConfig;
 
@@ -56,6 +62,10 @@ public class SyncDataHelper {
         dynamicLogTags = new HashMap<>();
         dynamicLRumTags = new HashMap<>();
         rumStaticFields = new HashMap<>();
+        rumReservedKeys = Collections.newSetFromMap(
+                new ConcurrentHashMap<String, Boolean>());
+        rumReservedKeys.add(KEY_SDK_DATA_FLAG);
+        rumReservedKeys.add(Constants.KEY_RUM_DISPLAY);
     }
 
     void initBaseConfig(FTSDKConfig config) {
@@ -64,6 +74,7 @@ public class SyncDataHelper {
         this.lineDataModifier = config.getLineDataModifier();
 
         basePublicTags.putAll(applyModifier(config.getGlobalContext()));
+        rumReservedKeys.addAll(config.getGlobalContext().keySet());
     }
 
     void initLogConfig(FTLoggerConfig config) {
@@ -79,6 +90,8 @@ public class SyncDataHelper {
         rumStaticFields.put(Constants.KEY_RUM_SESSION_ON_ERROR_SAMPLE_RATE,
                 applyModifier(Constants.KEY_RUM_SESSION_ON_ERROR_SAMPLE_RATE, config.getSessionErrorSampleRate()));
         rumTags.putAll(applyModifier(config.getGlobalContext()));
+        rumReservedKeys.addAll(rumStaticFields.keySet());
+        rumReservedKeys.addAll(config.getGlobalContext().keySet());
     }
 
     HashMap<String, Object> checkSessionReplayRUMLinksKeys(String[] rumLinkKeys) {
@@ -175,6 +188,7 @@ public class SyncDataHelper {
         if (globalContext != null) {
             applyModifier(globalContext);
             dynamicBaseTags.putAll(globalContext);
+            rumReservedKeys.addAll(globalContext.keySet());
         }
     }
 
@@ -187,6 +201,7 @@ public class SyncDataHelper {
     void appendGlobalContext(String key, String value) {
         if (!Utils.isNullOrEmpty(key) && !Utils.isNullOrEmpty(value)) {
             dynamicBaseTags.put(key, applyModifier(key, value));
+            rumReservedKeys.add(key);
         }
     }
 
@@ -200,6 +215,7 @@ public class SyncDataHelper {
         if (globalContext != null) {
             applyModifier(globalContext);
             dynamicLRumTags.putAll(globalContext);
+            rumReservedKeys.addAll(globalContext.keySet());
             Object keyArr = rumTags.get(Constants.KEY_RUM_CUSTOM_KEYS);
             if (keyArr == null) {
                 keyArr = "[]";
@@ -219,6 +235,7 @@ public class SyncDataHelper {
     void appendRUMGlobalContext(String key, String value) {
         if (!Utils.isNullOrEmpty(key) && !Utils.isNullOrEmpty(value)) {
             dynamicLRumTags.put(key, applyModifier(key, value));
+            rumReservedKeys.add(key);
 
             Object keyArr = rumTags.get(Constants.KEY_RUM_CUSTOM_KEYS);
             if (keyArr == null) {
@@ -228,6 +245,10 @@ public class SyncDataHelper {
             rumTags.put(Constants.KEY_RUM_CUSTOM_KEYS, Utils.addItemToJsonArray(keyArrString, key));
 
         }
+    }
+
+    Set<String> getRUMReservedKeys() {
+        return new HashSet<>(rumReservedKeys);
     }
 
     /**
@@ -268,6 +289,8 @@ public class SyncDataHelper {
 
     public String getBodyContent(String measurement, HashMap<String, Object> tags,
                                  HashMap<String, Object> fields, long timeStamp, DataType dataType, String uuid) {
+        boolean webViewLog = dataType == DataType.LOG && tags != null
+                && Boolean.TRUE.equals(tags.get(Constants.KEY_RUM_VIEW_IS_WEB_VIEW));
         if (fields != null && isRUMDataType(dataType)) {
             RUMHeatMapPropertyBuilder.appendDisplay(fields);
         }
@@ -283,9 +306,12 @@ public class SyncDataHelper {
             // log data
             mergeTags.putAll(dynamicBaseTags);
             mergeTags.putAll(dynamicLogTags);
-            mergeTags.putAll(logTags);
-            if (logConfig != null) {
-                if (logConfig.isEnableLinkRumData()) {
+            if (webViewLog) {
+                mergeWebViewLogTags(mergeTags);
+                mergeTags.put(Constants.KEY_RUM_VIEW_IS_WEB_VIEW, true);
+            } else {
+                mergeTags.putAll(logTags);
+                if (logConfig != null && logConfig.isEnableLinkRumData()) {
                     mergeTags.putAll(rumTags);
                 }
             }
@@ -303,24 +329,7 @@ public class SyncDataHelper {
                 mergeTags.putAll(rumTags);
                 fields.putAll(rumStaticFields);
             } else {
-                Object webSDKVersion = mergeTags.get(Constants.KEY_SDK_VERSION);
-                Iterator<String> keys = rumTags.keySet().iterator();
-                while (keys.hasNext()) {
-                    String key = keys.next();
-                    if (!key.equals(Constants.KEY_SERVICE)) {
-                        if (key.equals(Constants.KEY_SDK_PACKAGE_INFO)) {
-                            Object pkgInfo = rumTags.get(Constants.KEY_SDK_PACKAGE_INFO);
-                            if (pkgInfo != null) {
-                                String replacePkgInfo = PackageUtils.appendPackageVersion(pkgInfo.toString(),
-                                        Constants.KEY_RUM_SDK_PACKAGE_WEB, webSDKVersion + "");
-                                mergeTags.put(Constants.KEY_SDK_PACKAGE_INFO,
-                                        applyModifier(Constants.KEY_SDK_PACKAGE_INFO, replacePkgInfo));
-                            }
-                        } else {
-                            mergeTags.put(key, rumTags.get(key));
-                        }
-                    }
-                }
+                mergeWebViewNativeTags(mergeTags, rumTags);
             }
             if (appLineModifier(dataType, measurement, uuid, mergeTags, fields)) {
                 return "";
@@ -331,6 +340,45 @@ public class SyncDataHelper {
         }
         return bodyContent;
 
+    }
+
+    private void mergeWebViewLogTags(HashMap<String, Object> mergeTags) {
+        HashMap<String, Object> nativeTags = new LinkedHashMap<>();
+        nativeTags.putAll(logTags);
+        if (logConfig != null && logConfig.isEnableLinkRumData()) {
+            nativeTags.putAll(rumTags);
+        }
+        mergeWebViewNativeTags(mergeTags, nativeTags);
+    }
+
+    /**
+     * Applies the WebView RUM collision rules: keep the Browser service, use native SDK
+     * identity and configuration tags, and retain the Browser SDK version in sdk_pkg_info.web.
+     */
+    private void mergeWebViewNativeTags(HashMap<String, Object> mergeTags,
+                                        HashMap<String, Object> nativeTags) {
+        Object webSDKVersion = mergeTags.get(Constants.KEY_SDK_VERSION);
+        Iterator<String> keys = nativeTags.keySet().iterator();
+        while (keys.hasNext()) {
+            String key = keys.next();
+            if (Constants.KEY_SERVICE.equals(key)) {
+                continue;
+            }
+            if (Constants.KEY_SDK_PACKAGE_INFO.equals(key)) {
+                Object pkgInfo = nativeTags.get(Constants.KEY_SDK_PACKAGE_INFO);
+                if (pkgInfo != null && webSDKVersion != null) {
+                    String replacePkgInfo = PackageUtils.appendPackageVersion(
+                            pkgInfo.toString(), Constants.KEY_RUM_SDK_PACKAGE_WEB,
+                            webSDKVersion.toString());
+                    mergeTags.put(Constants.KEY_SDK_PACKAGE_INFO,
+                            applyModifier(Constants.KEY_SDK_PACKAGE_INFO, replacePkgInfo));
+                } else if (pkgInfo != null) {
+                    mergeTags.put(key, pkgInfo);
+                }
+            } else {
+                mergeTags.put(key, nativeTags.get(key));
+            }
+        }
     }
 
     private boolean isRUMDataType(DataType dataType) {

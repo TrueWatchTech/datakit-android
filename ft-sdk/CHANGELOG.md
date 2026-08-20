@@ -1,3 +1,34 @@
+# agent 1.7.5
+1. Added OkHttp WebSocket handshake RUM Resource collection through `FTRUMConfig.setEnableTraceUserResource(true)`. With `ft-plugin >= 1.3.8`, calls can be collected automatically; without Plugin instrumentation, use `FTWebSocket.newWebSocket(...)` or `FTWebSocket.wrap(...)`. Added `resource_type=websocket`, `resource_websocket_collection_level=handshake`, and `resource_websocket_handshake_state` (`success`, `rejected`, or `failed`).
+2. Fixed cold-start Action `app_launch_type` classification when a background component starts before the first Activity, and excluded device deep-sleep time from cold-start duration.
+3. Added `FTRUMConfig.setIssueDataProvider(...)` to attach custom fields to automatically collected Crash and ANR RUM Errors, including recovered historical ANRs.
+4. Added fatal ANR recovery on Android 11 (API 30) and above for `FTRUMConfig.setEnableTrackAppANR(true)`, reporting the ANR after a later process start with its original RUM View context. Android 10 and below continue to use live watchdog/native ANR collection; non-fatal live ANRs are not collected on Android 11 and above.
+5. Fixed duplicate watchdog ANR reporting within one SDK lifecycle and delayed detector shutdown when `FTSdk.shutDown()` is called.
+6. Added WebView Browser Log collection through `FTLoggerConfig.setEnableWebViewLog(true)`, including log filtering, caching and upload, `FTLoggerConfig.setEnableLinkRumData(...)` RUM correlation, and remote `logEnableWebViewLog` support.
+7. Improved WebView host configuration with `FTSDKConfig.setAllowWebViewHost(...)` for both WebView RUM and Log collection, and deprecated `FTRUMConfig.setAllowWebViewHost(...)`.
+8. Fixed a memory leak where WebView Session Replay retained destroyed WebViews and Activities after replay stopped.
+
+---
+# agent 1.7.5-beta02
+1. Added `FTWebSocket.newWebSocket()` and idempotent `FTWebSocket.wrap()` APIs for explicit OkHttp WebSocket handshake Resource collection without Plugin instrumentation, sharing the same collection core and duplicate protection as the Plugin path.
+
+---
+# agent 1.7.5-beta01
+1. Added opt-in Browser Logs SDK collection through `FTWebViewJavascriptBridge` with `FTLoggerConfig.setEnableWebViewLog`, native Log sampling/filtering/cache/upload handling, WebView RUM-aligned native tags and `setEnableLinkRumData` control, shared WebView host configuration through `FTSDKConfig.setAllowWebViewHost`, and remote `logEnableWebViewLog` support.
+
+---
+# agent 1.7.5-alpha01
+1. Added automatic OkHttp WebSocket handshake RUM Resource collection through `ft-plugin` `newWebSocket()` instrumentation, emitting `resource_type=websocket`, `resource_websocket_collection_level=handshake`, and `resource_websocket_handshake_state` with `success`, `rejected`, or `failed`; requires `ft-plugin >= 1.3.8-alpha01`.
+2. Fixed concurrent WebSocket handshakes sharing a Resource ID and emitting duplicate Resources or invalid Download/Transfer timing phases.
+3. Fixed cold-start `app_launch_type` classification when a background component starts the process long before the first Activity.
+4. Aligned cold-start duration calculation with the uptime clock so device deep sleep is not counted as launch work.
+5. Added `FTRUMConfig.setIssueDataProvider(FTIssueDataProvider)` and `FTIssueDataProvider.provideAdditionalFields(FTIssueInfo)` to attach validated custom fields to automatically collected Java/native Crash and watchdog/native ANR RUM Errors, including historical native dump context.
+6. Added API 30+ fatal ANR recovery through `ApplicationExitInfo`, with persisted historical RUM View association and multi-process effectively-once deduplication across DB, File, and Shadow storage modes.
+7. Fixed Java watchdog ANR detection so it rearms after the main thread recovers and exits promptly during SDK shutdown.
+8. Fixed WebView Session Replay slot callbacks retaining destroyed WebViews and Activities while preserving Native View rebind handling.
+9. Added opt-in Browser Logs SDK collection through `FTWebViewJavascriptBridge` with `FTLoggerConfig.setEnableWebViewLog`, native Log sampling/filtering/cache/upload handling, WebView RUM-aligned native tags and `setEnableLinkRumData` control, shared WebView host configuration through `FTSDKConfig.setAllowWebViewHost`, and remote `logEnableWebViewLog` support.
+
+---
 # agent 1.7.4
 1. Added experimental Android RUM Heatmap support with `display`, `action_position`, and `action_target`; element association requires `ft-session-replay >= 0.1.7`.
 2. Fixed locale-sensitive parsing and improved custom log console fault tolerance.

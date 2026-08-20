@@ -1,3 +1,15 @@
+# plugin 1.3.8
+1. Added automatic OkHttp `newWebSocket()` instrumentation for WebSocket handshake RUM Resource collection when `FTRUMConfig.setEnableTraceUserResource(true)` is enabled; requires `ft-sdk >= 1.7.5`.
+
+---
+# plugin 1.3.8-beta01
+1. Same as version 1.3.8-alpha01.
+
+---
+# plugin 1.3.8-alpha01
+1. Added automatic OkHttp `newWebSocket()` instrumentation for WebSocket handshake RUM Resource collection; requires `ft-sdk >= 1.7.5-alpha01`.
+
+---
 # plugin 1.3.7
 1. Added wildcard support for `ignorePackages`.
 2. Fix an issue where native `.so` symbol files cannot be detected when `autoUploadNativeDebugSymbol` is enabled and the default `nativeLibPath` auto-detection is used with AGP native library intermediate directories.

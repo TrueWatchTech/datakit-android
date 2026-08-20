@@ -9,6 +9,7 @@ import android.webkit.ValueCallback;
 import android.webkit.WebView;
 
 import com.ft.sdk.garble.bean.CollectType;
+import com.ft.sdk.garble.bean.LogBean;
 import com.ft.sdk.garble.utils.AopUtils;
 import com.ft.sdk.garble.utils.Constants;
 import com.ft.sdk.garble.utils.DCSWebViewUtils;
@@ -19,6 +20,7 @@ import com.ft.sdk.garble.utils.Utils;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.lang.ref.WeakReference;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -125,15 +127,46 @@ final class FTWebViewHandler implements WebAppInterface.JsReceiver {
      * @param webview
      */
     public void setWebView(View webview) {
-        FTRUMConfig config = FTRUMConfigManager.get().getConfig();
-        if (config.isRumEnable() && config.isEnableTraceWebView()) {
-            if (FTSdk.isSessionReplaySupport()) {
-                setWebView(webview, config.getAllowWebViewHost(),
-                        SessionReplayBridge.getPrivacyLevel(), new String[]{"records"});
-            } else {
-                setWebView(webview, config.getAllowWebViewHost());
+        FTRUMConfig rumConfig = FTRUMConfigManager.get().getConfig();
+        FTLoggerConfig loggerConfig = FTLoggerConfigManager.get().getConfig();
+        if (!shouldInstallWebViewBridge(rumConfig, loggerConfig)) {
+            return;
+        }
+
+        FTSDKConfig baseConfig = FTSdk.checkInstallState()
+                ? FTSdk.get().getBaseConfig() : null;
+        String[] allowWebViewHost = resolveAllowedWebViewHosts(baseConfig, rumConfig);
+        if (isRumWebViewEnabled(rumConfig) && FTSdk.isSessionReplaySupport()) {
+            setWebView(webview, allowWebViewHost,
+                    SessionReplayBridge.getPrivacyLevel(), new String[]{"records"});
+        } else {
+            setWebView(webview, allowWebViewHost);
+        }
+    }
+
+    static boolean shouldInstallWebViewBridge(FTRUMConfig rumConfig,
+                                              FTLoggerConfig loggerConfig) {
+        return isRumWebViewEnabled(rumConfig)
+                || loggerConfig != null && loggerConfig.isEnableWebViewLog();
+    }
+
+    static boolean isRumWebViewEnabled(FTRUMConfig rumConfig) {
+        return rumConfig != null
+                && rumConfig.isRumEnable()
+                && rumConfig.isEnableTraceWebView();
+    }
+
+    static String[] resolveAllowedWebViewHosts(FTSDKConfig baseConfig,
+                                               FTRUMConfig rumConfig) {
+        if (baseConfig != null) {
+            if (baseConfig.getRemoteAllowWebViewHost() != null) {
+                return baseConfig.getRemoteAllowWebViewHost();
+            }
+            if (baseConfig.isAllowWebViewHostConfigured()) {
+                return baseConfig.getAllowWebViewHost();
             }
         }
+        return rumConfig == null ? null : rumConfig.getAllowWebViewHost();
     }
 
     private void setWebView(View webview, String[] allowWebViewHost) {
@@ -166,9 +199,8 @@ final class FTWebViewHandler implements WebAppInterface.JsReceiver {
             dataBatcher = SessionReplayBridge.newWebViewDataBatcher(isDCWebView);
             // Initialize inactive timestamp to 0 (active state)
             inactiveTimestamp = 0;
+            checkAndStartSnapshotTimer();
         }
-
-        checkAndStartSnapshotTimer();
     }
 
     private void getRelativeNativeViewId() {
@@ -200,24 +232,47 @@ final class FTWebViewHandler implements WebAppInterface.JsReceiver {
      * Bind callback to slotId with the given globalContextViewId
      */
     private void registerViewChangeCallback(long slotId, String globalContextViewId) {
-        SessionReplayBridge.bindSlot(slotId, globalContextViewId, new SessionReplayBridge.ViewChangeCallback() {
-            @Override
-            public void onViewChanged(String viewId) {
-                rebindView(viewId);
-            }
-        });
+        SessionReplayBridge.bindSlot(slotId, globalContextViewId,
+                new WeakViewChangeCallback(this));
 
         // Register slot rebind callback to restore timer when same slotId is rebound
-        SessionReplayBridge.setSlotRebindCallback(slotId, new SessionReplayBridge.SlotRebindCallback() {
-            @Override
-            public void onSlotRebound(long slotId) {
-                // Restore timer when slotId is rebound
-                if (slotID == slotId) {
-                    checkAndStartSnapshotTimer();
-                    LogUtils.d(LOG_TAG, "Slot rebind detected, restored snapshot timer and resumed accepting Session Replay data for slotId:" + slotId);
-                }
+        SessionReplayBridge.setSlotRebindCallback(slotId,
+                new WeakSlotRebindCallback(this));
+    }
+
+    private static final class WeakViewChangeCallback
+            implements SessionReplayBridge.ViewChangeCallback {
+        private final WeakReference<FTWebViewHandler> handlerReference;
+
+        private WeakViewChangeCallback(FTWebViewHandler handler) {
+            handlerReference = new WeakReference<>(handler);
+        }
+
+        @Override
+        public void onViewChanged(String viewId) {
+            FTWebViewHandler handler = handlerReference.get();
+            if (handler != null) {
+                handler.rebindView(viewId);
             }
-        });
+        }
+    }
+
+    private static final class WeakSlotRebindCallback
+            implements SessionReplayBridge.SlotRebindCallback {
+        private final WeakReference<FTWebViewHandler> handlerReference;
+
+        private WeakSlotRebindCallback(FTWebViewHandler handler) {
+            handlerReference = new WeakReference<>(handler);
+        }
+
+        @Override
+        public void onSlotRebound(long slotId) {
+            FTWebViewHandler handler = handlerReference.get();
+            if (handler != null && handler.slotID == slotId) {
+                handler.checkAndStartSnapshotTimer();
+                LogUtils.d(LOG_TAG, "Slot rebind detected, restored snapshot timer and resumed accepting Session Replay data for slotId:" + slotId);
+            }
+        }
     }
 
     /**
@@ -271,7 +326,7 @@ final class FTWebViewHandler implements WebAppInterface.JsReceiver {
      * {@link #WEB_JS_NAME}
      * {@link #WEB_JS_TYPE_RUM}
      * {@link #WEB_JS_TYPE_TRACK}  (not involved)
-     * {@link #WEB_JS_TYPE_LOG} (not involved)
+     * {@link #WEB_JS_TYPE_LOG}
      * {@link #WEB_JS_TYPE_URL_VERIFY} (not involved)
      *
      * @param s
@@ -286,6 +341,7 @@ final class FTWebViewHandler implements WebAppInterface.JsReceiver {
             JSONObject data = json.optJSONObject(WEB_JS_DATA);
             String tag = json.optString(WEB_JS_INNER_TAG);
             if (name.equals(WEB_JS_TYPE_RUM)) {
+                if (!isRumWebViewEnabled(FTRUMConfigManager.get().getConfig())) return;
                 if (data != null) {
                     JSONObject jsonTags = data.optJSONObject(Constants.TAGS);
                     JSONObject jsonFields = data.optJSONObject(Constants.FIELDS);
@@ -398,7 +454,8 @@ final class FTWebViewHandler implements WebAppInterface.JsReceiver {
                 }
 
             } else if (name.equals(WEB_JS_TYPE_SESSION_REPLAY)) {
-                if (!FTSdk.isSessionReplaySupport()) return;
+                if (!isRumWebViewEnabled(FTRUMConfigManager.get().getConfig())
+                        || !FTSdk.isSessionReplaySupport()) return;
                 
                 // Check if WebView is active
                 boolean isActive = isWebViewActive();
@@ -441,7 +498,19 @@ final class FTWebViewHandler implements WebAppInterface.JsReceiver {
             } else if (name.equals(WEB_JS_TYPE_TRACK)) {
                 //no use
             } else if (name.equals(WEB_JS_TYPE_LOG)) {
-                //no use
+                FTLoggerConfig loggerConfig = FTLoggerConfigManager.get().getConfig();
+                if (loggerConfig != null && loggerConfig.isEnableWebViewLog()) {
+                    if (data == null) {
+                        LogUtils.d(LOG_TAG, "Ignore WebView log event without object data");
+                    } else {
+                        LogBean logBean = WebViewLogEventMapper.map(data);
+                        if (logBean != null) {
+                            TrackLogManager.get().trackLog(logBean, false);
+                        } else {
+                            LogUtils.d(LOG_TAG, "Ignore invalid WebView log event");
+                        }
+                    }
+                }
             } else if (name.equals(WEB_JS_TYPE_URL_VERIFY)) {
                 //no use
             }

@@ -1,0 +1,35 @@
+jdk:
+  - openjdk11
+
+install:
+  - |
+    set -e
+
+    unsupported_version() {
+      echo "Unsupported JitPack version: ${VERSION:-<empty>}" >&2
+      exit 1
+    }
+
+    case "${VERSION:-}" in
+      agent_*)
+        publish_task=:ft-sdk:publishToMavenLocal
+        ;;
+      native_*)
+        publish_task=:ft-native:publishToMavenLocal
+        ;;
+      plugin_*)
+        publish_task=:ft-plugin:publishToMavenLocal
+        ;;
+      replay_material_*|replay_compose_*)
+        unsupported_version
+        ;;
+      replay_*)
+        publish_task=:ft-session-replay:publishToMavenLocal
+        ;;
+      *)
+        unsupported_version
+        ;;
+    esac
+
+    echo "Publishing $VERSION with $publish_task"
+    ./gradlew clean "$publish_task" -x test -x lint

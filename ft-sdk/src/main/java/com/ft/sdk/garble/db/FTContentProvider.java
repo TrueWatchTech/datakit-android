@@ -21,6 +21,7 @@ import com.ft.sdk.garble.db.base.DataBaseCallBack;
 import com.ft.sdk.garble.utils.Constants;
 import com.ft.sdk.garble.utils.LogUtils;
 import com.ft.sdk.garble.utils.Utils;
+import com.ft.sdk.internal.anr.historical.HistoricalAnrDataId;
 
 import java.util.ArrayList;
 
@@ -46,6 +47,21 @@ public class FTContentProvider extends ContentProvider {
     // Call method name constants
     public static final String METHOD_EXEC_SQL = "execSQL";
     public static final String METHOD_EXEC_SQL_BATCH = "execSQLBatch";
+    public static final String METHOD_HISTORICAL_RUM_PERSIST = "historicalRumPersist";
+    public static final String METHOD_HISTORICAL_RUM_COMMIT = "historicalRumCommit";
+    /** @deprecated Historical ANR claims are now persisted in sidecar files. */
+    @Deprecated
+    public static final String METHOD_HISTORICAL_EXIT_CLAIM = "historicalExitClaim";
+    /** @deprecated Historical ANR claims are now persisted in sidecar files. */
+    @Deprecated
+    public static final String METHOD_HISTORICAL_EXIT_UPDATE = "historicalExitUpdate";
+    /** @deprecated Historical ANR claims are now persisted in sidecar files. */
+    @Deprecated
+    public static final String METHOD_HISTORICAL_EXIT_CLEANUP = "historicalExitCleanup";
+    /** @deprecated Historical View error counting is part of historicalRumPersist. */
+    @Deprecated
+    public static final String METHOD_HISTORICAL_VIEW_ERROR_COUNT =
+            "historicalViewErrorCount";
 
     // Complete URI constants
     private static volatile String authority;
@@ -360,9 +376,153 @@ public class FTContentProvider extends ContentProvider {
                 return handleExecSQL(arg, extras);
             case METHOD_EXEC_SQL_BATCH:
                 return handleExecSQLBatch(arg, extras);
+            case METHOD_HISTORICAL_RUM_PERSIST:
+                return handleHistoricalRumPersist(extras);
+            case METHOD_HISTORICAL_RUM_COMMIT:
+                return handleHistoricalRumCommit(extras);
             default:
                 return super.call(method, arg, extras);
         }
+    }
+
+    private Bundle handleHistoricalRumPersist(final Bundle extras) {
+        final Bundle result = new Bundle();
+        result.putBoolean("success", false);
+        result.putBoolean("inserted", false);
+        if (extras == null) {
+            return result;
+        }
+        try {
+            getDbManager().getDB(true, new DataBaseCallBack() {
+                @Override
+                public void run(SQLiteDatabase db) {
+                    db.beginTransaction();
+                    Cursor cursor = null;
+                    try {
+                        String uuid = extras.getString(FTSQL.RECORD_COLUMN_DATA_UUID);
+                        String dedupeKey = extras.getString(FTSQL.RECORD_COLUMN_DEDUPE_KEY);
+                        String stableUuid = HistoricalAnrDataId.fromDedupeKey(dedupeKey);
+                        if (stableUuid != null) {
+                            uuid = stableUuid;
+                        }
+                        if (uuid == null || uuid.length() == 0) {
+                            return;
+                        }
+                        cursor = db.query(
+                                FTSQL.FT_SYNC_DATA_FLAT_TABLE_NAME,
+                                new String[]{FTSQL.RECORD_COLUMN_ID},
+                                FTSQL.RECORD_COLUMN_DATA_UUID + "=?",
+                                new String[]{uuid},
+                                null,
+                                null,
+                                null);
+                        if (cursor.moveToFirst()) {
+                            result.putBoolean("success", true);
+                            db.setTransactionSuccessful();
+                            return;
+                        }
+                        ContentValues values = new ContentValues();
+                        values.put(FTSQL.RECORD_COLUMN_TM,
+                                extras.getLong(FTSQL.RECORD_COLUMN_TM));
+                        values.put(FTSQL.RECORD_COLUMN_DATA_UUID, uuid);
+                        values.put(FTSQL.RECORD_COLUMN_DATA,
+                                extras.getString(FTSQL.RECORD_COLUMN_DATA));
+                        values.put(FTSQL.RECORD_COLUMN_DATA_TYPE,
+                                extras.getString(FTSQL.RECORD_COLUMN_DATA_TYPE));
+                        long inserted = db.insert(
+                                FTSQL.FT_SYNC_DATA_FLAT_TABLE_NAME,
+                                null,
+                                values);
+                        if (inserted == -1) {
+                            return;
+                        }
+                        String viewId = extras.getString(FTSQL.RUM_COLUMN_VIEW_ID);
+                        if (viewId != null && viewId.length() > 0) {
+                            db.execSQL(
+                                    "UPDATE " + FTSQL.FT_TABLE_VIEW
+                                            + " SET " + FTSQL.RUM_COLUMN_ERROR_COUNT
+                                            + "=COALESCE(" + FTSQL.RUM_COLUMN_ERROR_COUNT
+                                            + ",0)+1 WHERE " + FTSQL.RUM_COLUMN_ID + "=?",
+                                    new Object[]{viewId});
+                        }
+                        result.putBoolean("success", true);
+                        result.putBoolean("inserted", true);
+                        db.setTransactionSuccessful();
+                    } finally {
+                        if (cursor != null) {
+                            cursor.close();
+                        }
+                        db.endTransaction();
+                    }
+                }
+            });
+        } catch (Exception e) {
+            LogUtils.e(TAG, "Historical RUM persist failed: " + e.getMessage());
+        }
+        return result;
+    }
+
+    private Bundle handleHistoricalRumCommit(final Bundle extras) {
+        final Bundle result = new Bundle();
+        result.putBoolean("success", false);
+        result.putBoolean("promoted", false);
+        if (extras == null) {
+            return result;
+        }
+        try {
+            getDbManager().getDB(true, new DataBaseCallBack() {
+                @Override
+                public void run(SQLiteDatabase db) {
+                    db.beginTransaction();
+                    Cursor cursor = null;
+                    try {
+                        String uuid = extras.getString(FTSQL.RECORD_COLUMN_DATA_UUID);
+                        String pendingType = extras.getString("pending_type");
+                        String committedType =
+                                extras.getString(FTSQL.RECORD_COLUMN_DATA_TYPE);
+                        cursor = db.query(
+                                FTSQL.FT_SYNC_DATA_FLAT_TABLE_NAME,
+                                new String[]{FTSQL.RECORD_COLUMN_DATA_TYPE},
+                                FTSQL.RECORD_COLUMN_DATA_UUID + "=?",
+                                new String[]{uuid}, null, null, null);
+                        if (!cursor.moveToFirst()) {
+                            return;
+                        }
+                        String storedType = cursor.getString(0);
+                        if (committedType.equals(storedType)) {
+                            result.putBoolean("success", true);
+                            db.setTransactionSuccessful();
+                            return;
+                        }
+                        if (!pendingType.equals(storedType)) {
+                            return;
+                        }
+                        ContentValues values = new ContentValues();
+                        values.put(FTSQL.RECORD_COLUMN_DATA_TYPE, committedType);
+                        int updated = db.update(
+                                FTSQL.FT_SYNC_DATA_FLAT_TABLE_NAME,
+                                values,
+                                FTSQL.RECORD_COLUMN_DATA_UUID + "=? AND "
+                                        + FTSQL.RECORD_COLUMN_DATA_TYPE + "=?",
+                                new String[]{uuid, pendingType});
+                        if (updated != 1) {
+                            return;
+                        }
+                        result.putBoolean("success", true);
+                        result.putBoolean("promoted", true);
+                        db.setTransactionSuccessful();
+                    } finally {
+                        if (cursor != null) {
+                            cursor.close();
+                        }
+                        db.endTransaction();
+                    }
+                }
+            });
+        } catch (Exception e) {
+            LogUtils.e(TAG, "Historical RUM commit failed: " + e.getMessage());
+        }
+        return result;
     }
 
     /**

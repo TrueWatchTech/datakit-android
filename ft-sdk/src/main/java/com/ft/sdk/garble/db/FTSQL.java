@@ -39,6 +39,7 @@ public class FTSQL {
      * Data type
      */
     public static final String RECORD_COLUMN_DATA_TYPE = "type";
+    public static final String RECORD_COLUMN_DEDUPE_KEY = "dedupe_key";
 
     /**
      * Table structure for synchronized data
@@ -51,6 +52,12 @@ public class FTSQL {
             RECORD_COLUMN_DATA + " TEXT," +
             RECORD_COLUMN_DATA_TYPE + " TEXT" +
             ")";
+
+    /** @deprecated Kept only for reading databases created by the v4 preview. */
+    @Deprecated
+    public static final String FT_SYNC_DEDUPE_INDEX_CREATE =
+            "CREATE UNIQUE INDEX if not exists idx_sync_data_dedupe_key ON "
+                    + FT_SYNC_DATA_FLAT_TABLE_NAME + "(" + RECORD_COLUMN_DEDUPE_KEY + ")";
 
     /**
      * {@link com.ft.sdk.garble.bean.ViewBean#id}
@@ -151,6 +158,9 @@ public class FTSQL {
      * {@link com.ft.sdk.garble.bean.ViewBean#getAttrJsonString()}
      */
     public static final String RUM_COLUMN_EXTRA_ATTR = "extra_attr";
+    public static final String RUM_COLUMN_PROCESS_NAME = "process_name";
+    public static final String RUM_COLUMN_PROCESS_RUN_ID = "process_run_id";
+    public static final String RUM_COLUMN_PROCESS_START_MS = "process_start_ms";
 
     /**
      * Action table name,{@link com.ft.sdk.garble.bean.ActionBean}
@@ -207,5 +217,42 @@ public class FTSQL {
             RUM_COLUMN_EXTRA_ATTR + " TEXT" +
             ")";
 
+    /** @deprecated Kept only for reading databases created by the v4 preview. */
+    @Deprecated
+    public static final String FT_HISTORICAL_EXIT_CLAIM_TABLE = "historical_exit_claim";
+    /** @deprecated Kept only for reading databases created by the v4 preview. */
+    @Deprecated
+    public static final int HISTORICAL_EXIT_STATE_CLAIMED = 1;
+    /** @deprecated Kept only for reading databases created by the v4 preview. */
+    @Deprecated
+    public static final int HISTORICAL_EXIT_STATE_COMMITTED = 2;
+    /** @deprecated Kept only for reading databases created by the v4 preview. */
+    @Deprecated
+    public static final int HISTORICAL_EXIT_STATE_RETRY = 3;
+    /** @deprecated Kept only for reading databases created by the v4 preview. */
+    @Deprecated
+    public static final int HISTORICAL_EXIT_STATE_DROPPED = 4;
+    /** @deprecated Kept only for compatibility tests and v4 preview migration. */
+    @Deprecated
+    public static final String FT_HISTORICAL_EXIT_CLAIM_CREATE =
+            "CREATE TABLE if not exists " + FT_HISTORICAL_EXIT_CLAIM_TABLE + " ("
+                    + "exit_key TEXT PRIMARY KEY,"
+                    + "state INTEGER NOT NULL,"
+                    + "owner_run_id TEXT,"
+                    + "lease_until_ms BIGINT NOT NULL DEFAULT 0,"
+                    + "attempt_count INTEGER NOT NULL DEFAULT 0,"
+                    + "process_name TEXT,"
+                    + "pid INTEGER,"
+                    + "exit_time_ms BIGINT,"
+                    + "reason INTEGER,"
+                    + "session_id TEXT,"
+                    + "view_id TEXT,"
+                    + "view_name TEXT,"
+                    + "collect_type TEXT,"
+                    + "event_dedupe_key TEXT,"
+                    + "view_error_counted INTEGER NOT NULL DEFAULT 0,"
+                    + "drop_reason TEXT,"
+                    + "updated_at_ms BIGINT NOT NULL"
+                    + ")";
 
 }

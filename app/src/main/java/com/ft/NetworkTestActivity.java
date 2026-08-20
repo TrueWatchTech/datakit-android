@@ -2,11 +2,15 @@ package com.ft;
 
 import android.os.Bundle;
 import android.widget.Button;
+import android.widget.EditText;
+import android.widget.TextView;
+import android.widget.Toast;
 
 import com.ft.BuildConfig;
 import com.ft.sdk.FTResourceEventListener;
 import com.ft.sdk.FTResourceInterceptor;
 import com.ft.sdk.FTTraceInterceptor;
+import com.ft.sdk.FTWebSocket;
 import com.ft.sdk.garble.http.RequestMethod;
 import com.ft.sdk.garble.utils.LogUtils;
 import com.ft.utils.RequestUtils;
@@ -14,6 +18,7 @@ import com.ft.utils.RequestUtils;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -21,6 +26,9 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
+import okhttp3.WebSocket;
+import okhttp3.WebSocketListener;
+import okio.ByteString;
 
 /**
  * Network test activity
@@ -29,6 +37,8 @@ import okhttp3.ResponseBody;
 public class NetworkTestActivity extends NameTitleActivity {
 
     private static final String TAG = "NetworkTestActivity";
+    private static final int DEFAULT_QUEUE_HOLD_SECONDS = 5;
+    private static final int MAX_QUEUE_HOLD_SECONDS = 15 * 60;
 
     private final OkHttpClient client = new OkHttpClient.Builder()
             .addInterceptor(new FTTraceInterceptor())
@@ -36,6 +46,18 @@ public class NetworkTestActivity extends NameTitleActivity {
             .eventListenerFactory(new FTResourceEventListener.FTFactory())
             .connectTimeout(10, TimeUnit.SECONDS)
             .build();
+
+    private final OkHttpClient webSocketClient = new OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(0, TimeUnit.MILLISECONDS)
+            .build();
+
+    private Button resourceQueueReproButton;
+    private EditText resourceQueueHoldSeconds;
+    private TextView resourceQueueResult;
+    private ResourceQueueTimingRepro resourceQueueTimingRepro;
+    private TextView webSocketTestResult;
+    private final AtomicReference<WebSocket> activeWebSocket = new AtomicReference<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -53,6 +75,196 @@ public class NetworkTestActivity extends NameTitleActivity {
         // Streaming download test
         Button streamDownloadBtn = findViewById(R.id.btn_stream_download);
         streamDownloadBtn.setOnClickListener(v -> testStreamDownload());
+
+        resourceQueueReproButton = findViewById(R.id.btn_resource_queue_repro);
+        resourceQueueHoldSeconds = findViewById(R.id.et_resource_queue_hold_seconds);
+        resourceQueueResult = findViewById(R.id.tv_resource_queue_result);
+        resourceQueueReproButton.setOnClickListener(v -> testResourceQueueTiming());
+
+        webSocketTestResult = findViewById(R.id.tv_websocket_test_result);
+        bindWebSocketTestButton(
+                R.id.btn_websocket_success,
+                "success",
+                BuildConfig.WEBSOCKET_TEST_SUCCESS_URL,
+                false
+        );
+        bindWebSocketTestButton(
+                R.id.btn_websocket_manual_success,
+                "manual-success",
+                BuildConfig.WEBSOCKET_TEST_SUCCESS_URL,
+                true
+        );
+        bindWebSocketTestButton(
+                R.id.btn_websocket_reject,
+                "reject",
+                BuildConfig.WEBSOCKET_TEST_REJECT_URL,
+                false
+        );
+        bindWebSocketTestButton(
+                R.id.btn_websocket_invalid_upgrade,
+                "invalid-upgrade",
+                BuildConfig.WEBSOCKET_TEST_INVALID_UPGRADE_URL,
+                false
+        );
+        bindWebSocketTestButton(
+                R.id.btn_websocket_tcp_failure,
+                "tcp-failure",
+                BuildConfig.WEBSOCKET_TEST_TCP_FAILURE_URL,
+                false
+        );
+        findViewById(R.id.btn_websocket_close).setOnClickListener(v -> closeActiveWebSocket());
+        showWebSocketConfiguration();
+    }
+
+    private void bindWebSocketTestButton(int buttonId, String scenario, String url,
+                                         boolean explicitIntegration) {
+        Button button = findViewById(buttonId);
+        boolean configured = isWebSocketUrl(url);
+        button.setEnabled(configured);
+        button.setOnClickListener(v -> startWebSocketTest(
+                scenario, url, explicitIntegration));
+    }
+
+    private boolean isWebSocketUrl(String url) {
+        return url != null && (url.startsWith("ws://") || url.startsWith("wss://"));
+    }
+
+    private void showWebSocketConfiguration() {
+        String configuration = "success=" + displayUrl(BuildConfig.WEBSOCKET_TEST_SUCCESS_URL)
+                + "\nreject=" + displayUrl(BuildConfig.WEBSOCKET_TEST_REJECT_URL)
+                + "\ninvalid-upgrade=" + displayUrl(BuildConfig.WEBSOCKET_TEST_INVALID_UPGRADE_URL)
+                + "\ntcp-failure=" + displayUrl(BuildConfig.WEBSOCKET_TEST_TCP_FAILURE_URL);
+        webSocketTestResult.setText(configuration);
+    }
+
+    private String displayUrl(String url) {
+        return isWebSocketUrl(url) ? url : "not configured";
+    }
+
+    private void startWebSocketTest(String scenario, String url, boolean explicitIntegration) {
+        if (!isWebSocketUrl(url)) {
+            appendWebSocketResult(scenario + ": URL is not configured");
+            return;
+        }
+        closeActiveWebSocket();
+        String integration = explicitIntegration ? "explicit" : "plugin";
+        appendWebSocketResult(scenario + ": connecting via " + integration + " to " + url);
+        Request request = new Request.Builder().url(url).build();
+        WebSocketListener listener = new WebSocketListener() {
+            @Override
+            public void onOpen(WebSocket webSocket, Response response) {
+                appendWebSocketResult(scenario + ": onOpen status=" + response.code()
+                        + ", protocol=" + response.protocol());
+                webSocket.send("ft-sdk-websocket-handshake-test");
+            }
+
+            @Override
+            public void onMessage(WebSocket webSocket, String text) {
+                appendWebSocketResult(scenario + ": echo text=" + text);
+            }
+
+            @Override
+            public void onMessage(WebSocket webSocket, ByteString bytes) {
+                appendWebSocketResult(scenario + ": echo bytes=" + bytes.size());
+            }
+
+            @Override
+            public void onClosing(WebSocket webSocket, int code, String reason) {
+                appendWebSocketResult(scenario + ": onClosing code=" + code
+                        + ", reason=" + reason);
+                webSocket.close(code, reason);
+            }
+
+            @Override
+            public void onClosed(WebSocket webSocket, int code, String reason) {
+                appendWebSocketResult(scenario + ": onClosed code=" + code
+                        + ", reason=" + reason);
+                clearActiveWebSocket(webSocket);
+            }
+
+            @Override
+            public void onFailure(WebSocket webSocket, Throwable throwable, Response response) {
+                String status = response == null ? "none" : String.valueOf(response.code());
+                appendWebSocketResult(scenario + ": onFailure status=" + status
+                        + ", error=" + throwable.getClass().getSimpleName()
+                        + ": " + throwable.getMessage());
+                if (response != null) {
+                    response.close();
+                }
+                clearActiveWebSocket(webSocket);
+            }
+        };
+        WebSocket webSocket;
+        if (explicitIntegration) {
+            // Explicit Resource collection for apps that do not use ft-plugin instrumentation.
+            webSocket = FTWebSocket.newWebSocket(webSocketClient, request, listener);
+        } else {
+            webSocket = webSocketClient.newWebSocket(request, listener);
+        }
+        activeWebSocket.set(webSocket);
+    }
+
+    private void appendWebSocketResult(String message) {
+        LogUtils.d(TAG, "WebSocket test: " + message);
+        runOnUiThread(() -> webSocketTestResult.append("\n" + message));
+    }
+
+    private void clearActiveWebSocket(WebSocket webSocket) {
+        activeWebSocket.compareAndSet(webSocket, null);
+    }
+
+    private void closeActiveWebSocket() {
+        WebSocket webSocket = activeWebSocket.get();
+        if (webSocket != null) {
+            boolean closing = webSocket.close(1000, "test complete");
+            appendWebSocketResult("close requested=" + closing);
+            if (!closing) {
+                webSocket.cancel();
+                activeWebSocket.compareAndSet(webSocket, null);
+            }
+        }
+    }
+
+    private void testResourceQueueTiming() {
+        int queueHoldSeconds;
+        try {
+            queueHoldSeconds = Integer.parseInt(
+                    resourceQueueHoldSeconds.getText().toString().trim()
+            );
+        } catch (NumberFormatException ignored) {
+            queueHoldSeconds = DEFAULT_QUEUE_HOLD_SECONDS;
+        }
+        if (queueHoldSeconds < 1 || queueHoldSeconds > MAX_QUEUE_HOLD_SECONDS) {
+            Toast.makeText(
+                    this,
+                    "Hold time must be between 1 and 900 seconds",
+                    Toast.LENGTH_SHORT
+            ).show();
+            return;
+        }
+
+        resourceQueueReproButton.setEnabled(false);
+        resourceQueueResult.setText("正在启动真实并发排队场景…");
+        resourceQueueTimingRepro = new ResourceQueueTimingRepro();
+        resourceQueueTimingRepro.start(
+                queueHoldSeconds,
+                new ResourceQueueTimingRepro.Listener() {
+                    @Override
+                    public void onProgress(String message) {
+                        runOnUiThread(() -> resourceQueueResult.append("\n" + message));
+                    }
+
+                    @Override
+                    public void onComplete(String result) {
+                        LogUtils.d(TAG, "Resource queue timing reproduction:\n" + result);
+                        runOnUiThread(() -> {
+                            resourceQueueResult.setText(result);
+                            resourceQueueReproButton.setEnabled(true);
+                            resourceQueueTimingRepro = null;
+                        });
+                    }
+                }
+        );
     }
 
     /**
@@ -180,5 +392,14 @@ public class NetworkTestActivity extends NameTitleActivity {
             }
         }).start();
     }
-}
 
+    @Override
+    protected void onDestroy() {
+        closeActiveWebSocket();
+        ResourceQueueTimingRepro repro = resourceQueueTimingRepro;
+        if (repro != null) {
+            repro.close();
+        }
+        super.onDestroy();
+    }
+}

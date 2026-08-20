@@ -7,8 +7,11 @@ import com.ft.sdk.sessionreplay.utils.InternalLogger;
 
 import org.junit.Test;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
@@ -166,8 +169,71 @@ public class SessionReplayResourceUploaderTest {
         assertTrue(callback.uploadFilesCalled);
     }
 
+    @Test
+    public void upload_shouldForwardLinkContextToCallbacks() throws Exception {
+        TestUploadCallback callback = new TestUploadCallback(
+                new UploadResult(200, "{\"content\":{}}", ""),
+                new UploadResult(200, "upload success", "pkg-id")
+        );
+        SessionReplayResourceUploader uploader =
+                new SessionReplayResourceUploader(new NoOpLogger(), callback);
+        Map<String, Object> globalContext = new HashMap<>();
+        globalContext.put("wgt_id", "widget-1");
+        globalContext.put("vip", true);
+
+        UploadResult result = uploader.upload(
+                null,
+                Collections.singletonList(createEvent("app-id", "resource-1.png", globalContext)),
+                null
+        );
+
+        assertTrue(result.isSuccess());
+        assertEquals("widget-1", callback.checkedGlobalContext.get("wgt_id"));
+        assertEquals(true, callback.checkedGlobalContext.get("vip"));
+        assertEquals("widget-1", callback.uploadedGlobalContext.get("wgt_id"));
+    }
+
+    @Test
+    public void upload_shouldSeparateResourcesByWgtId() throws Exception {
+        TestUploadCallback callback = new TestUploadCallback(
+                new UploadResult(200, "{\"content\":{}}", ""),
+                new UploadResult(200, "upload success", "pkg-id")
+        );
+        SessionReplayResourceUploader uploader =
+                new SessionReplayResourceUploader(new NoOpLogger(), callback);
+        Map<String, Object> widgetOne = new HashMap<>();
+        widgetOne.put("wgt_id", "widget-1");
+        Map<String, Object> widgetTwo = new HashMap<>();
+        widgetTwo.put("wgt_id", "widget-2");
+
+        UploadResult result = uploader.upload(
+                null,
+                java.util.Arrays.asList(
+                        createEvent("app-id", "main.png"),
+                        createEvent("app-id", "widget-1-a.png", widgetOne),
+                        createEvent("app-id", "widget-2.png", widgetTwo),
+                        createEvent("app-id", "widget-1-b.png", widgetOne)
+                ),
+                null
+        );
+
+        assertTrue(result.isSuccess());
+        assertEquals(3, callback.checkedGlobalContexts.size());
+        assertTrue(callback.checkedGlobalContexts.get(0).isEmpty());
+        assertEquals("widget-1", callback.checkedGlobalContexts.get(1).get("wgt_id"));
+        assertEquals("widget-2", callback.checkedGlobalContexts.get(2).get("wgt_id"));
+        assertEquals(3, callback.uploadedFileGroups.size());
+        assertEquals(1, callback.uploadedFileGroups.get(0).size());
+        assertEquals(2, callback.uploadedFileGroups.get(1).size());
+        assertEquals(1, callback.uploadedFileGroups.get(2).size());
+    }
+
     private RawBatchEvent createEvent(String appId, String fileName) {
-        byte[] metadata = new EnrichedResource(new byte[]{1}, fileName).asBinaryMetadata(appId);
+        return createEvent(appId, fileName, Collections.<String, Object>emptyMap());
+    }
+
+    private RawBatchEvent createEvent(String appId, String fileName, Map<String, Object> globalContext) {
+        byte[] metadata = new EnrichedResource(new byte[]{1}, fileName).asBinaryMetadata(appId, globalContext);
         return new RawBatchEvent(new byte[]{1, 2, 3}, metadata);
     }
 
@@ -178,6 +244,10 @@ public class SessionReplayResourceUploaderTest {
         private boolean checkFilesCalled;
         private boolean uploadFilesCalled;
         private List<RawBatchEvent> uploadedFiles;
+        private Map<String, Object> checkedGlobalContext;
+        private Map<String, Object> uploadedGlobalContext;
+        private final List<Map<String, Object>> checkedGlobalContexts = new ArrayList<>();
+        private final List<List<RawBatchEvent>> uploadedFileGroups = new ArrayList<>();
 
         private TestUploadCallback(UploadResult checkResult, UploadResult uploadResult) {
             this.checkResult = checkResult;
@@ -185,15 +255,19 @@ public class SessionReplayResourceUploaderTest {
         }
 
         @Override
-        public UploadResult onCheckFilesExist(String appId, List<String> fileNames) {
+        public UploadResult onCheckFilesExist(String appId, List<String> fileNames, Map<String, Object> globalContext) {
             checkFilesCalled = true;
+            checkedGlobalContext = globalContext;
+            checkedGlobalContexts.add(new HashMap<>(globalContext));
             return checkResult;
         }
 
         @Override
-        public UploadResult onUploadFiles(String appId, List<RawBatchEvent> files) {
+        public UploadResult onUploadFiles(String appId, List<RawBatchEvent> files, Map<String, Object> globalContext) {
             uploadFilesCalled = true;
             uploadedFiles = files;
+            uploadedGlobalContext = globalContext;
+            uploadedFileGroups.add(new ArrayList<>(files));
             return uploadResult;
         }
     }

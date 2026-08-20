@@ -7,6 +7,7 @@ import android.database.sqlite.SQLiteOpenHelper;
 import androidx.annotation.Nullable;
 
 import com.ft.sdk.garble.db.FTSQL;
+import com.ft.sdk.internal.anr.historical.HistoricalAnrV4Migration;
 
 /**
  * BY huangDianHua
@@ -14,6 +15,7 @@ import com.ft.sdk.garble.db.FTSQL;
  * Description: Data management creation and upgrade
  */
 public class DatabaseHelper extends SQLiteOpenHelper {
+    private final Context context;
     private static class DatabaseSingleton {
         static DatabaseHelper single(Context context, String name, int version) {
             return new DatabaseHelper(context, name, version);
@@ -26,6 +28,9 @@ public class DatabaseHelper extends SQLiteOpenHelper {
 
     public DatabaseHelper(@Nullable Context context, @Nullable String name, int version) {
         super(context, name, null, version);
+        this.context = context == null || context.getApplicationContext() == null
+                ? context
+                : context.getApplicationContext();
     }
 
     @Override
@@ -36,19 +41,24 @@ public class DatabaseHelper extends SQLiteOpenHelper {
 
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        // Upgrade database
-        if (oldVersion == 1 && newVersion == 2) {
+        if (oldVersion < 2) {
             update1to2(db);
-        } else if (oldVersion < 3 && newVersion == 3) {
+        }
+        if (oldVersion < 3) {
             update2to3(db);
-            if (oldVersion == 1) {
-                update1to2(db);
-            }
         }
     }
 
     @Override
     public void onDowngrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+        if (oldVersion == 4 && newVersion == 3) {
+            try {
+                HistoricalAnrV4Migration.migrate(context, db);
+            } catch (Exception e) {
+                throw new IllegalStateException("Historical ANR v4 migration failed", e);
+            }
+            return;
+        }
         if (oldVersion == 3 && newVersion < 3) {
             createTable(db);
         } else {
@@ -84,4 +94,5 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     private void update2to3(SQLiteDatabase db) {
         db.execSQL(FTSQL.FT_TABLE_SYNC_CREATE);
     }
+
 }

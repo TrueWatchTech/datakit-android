@@ -3,6 +3,7 @@ package com.ft.sdk;
 import android.app.Activity;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import com.ft.sdk.garble.utils.Constants;
 import com.ft.sdk.garble.utils.Utils;
@@ -41,6 +42,12 @@ public class FTRUMConfig {
      * Set whether to detect ANR
      */
     private boolean enableTrackAppANR;
+
+    /**
+     * Custom field provider for automatically collected Crash and ANR Errors.
+     */
+    @Nullable
+    private FTIssueDataProvider issueDataProvider;
     /**
      * Whether to enable user action tracking
      */
@@ -156,7 +163,10 @@ public class FTRUMConfig {
      *
      * @param allowWebViewHost allowed WebView host list, or null to allow all hosts
      * @return this config for chaining
+     * @deprecated Configure the shared RUM and Log WebView host list with
+     * {@link FTSDKConfig#setAllowWebViewHost(String[])}.
      */
+    @Deprecated
     public FTRUMConfig setAllowWebViewHost(String[] allowWebViewHost) {
         this.allowWebViewHost = allowWebViewHost;
         return this;
@@ -361,16 +371,27 @@ public class FTRUMConfig {
         return this;
     }
     /**
-     * Returns whether ANR detection is enabled.
+     * Returns whether automatic ANR collection is enabled.
+     *
+     * @see #setEnableTrackAppANR(boolean)
      */
     public boolean isEnableTrackAppANR() {
         return enableTrackAppANR;
     }
 
     /**
-     * Whether to enable ANR detection, default is false
+     * Enables automatic ANR collection. The default is {@code false}.
      *
-     * @param enableTrackAppANR true to collect ANR events
+     * <p>On Android 11 (API 30) and above, the SDK does not run the live ANR watchdog or the
+     * native ANR collector. Fatal ANRs are recovered from {@code ApplicationExitInfo} after a
+     * later process start and reported as historical {@code anr_crash} Errors. Non-fatal live
+     * ANRs are not collected on these API levels.</p>
+     *
+     * <p>On Android 10 (API 29) and below, the SDK uses the live watchdog and, when the native
+     * component is available, the native ANR collector.</p>
+     *
+     * @param enableTrackAppANR {@code true} to collect ANR Errors using the strategy for the
+     *                          device API level
      * @return this config for chaining
      */
 
@@ -380,10 +401,18 @@ public class FTRUMConfig {
     }
 
     /**
-     * Whether to enable ANR detection, default is false
+     * Enables automatic ANR collection and configures additional Logcat capture. The default is
+     * {@code false}.
      *
-     * @param enableTrackAppANR true to collect ANR events
-     * @param extraLogCatWithANR ANR Crash additional logcat config
+     * <p>The API-level collection strategy is the same as
+     * {@link #setEnableTrackAppANR(boolean)}. {@code extraLogCatWithANR} is used only by the live
+     * watchdog/native ANR paths on Android 10 (API 29) and below. It is not applied to historical
+     * {@code ApplicationExitInfo} reports on Android 11 (API 30) and above.</p>
+     *
+     * @param enableTrackAppANR {@code true} to collect ANR Errors using the strategy for the
+     *                          device API level
+     * @param extraLogCatWithANR additional Logcat configuration for supported live/native ANR
+     *                           collection paths
      * @return this config for chaining
      */
     public FTRUMConfig setEnableTrackAppANR(boolean enableTrackAppANR, ExtraLogCatSetting extraLogCatWithANR) {
@@ -391,6 +420,29 @@ public class FTRUMConfig {
         this.extraLogCatWithANR = extraLogCatWithANR;
         return this;
     }
+
+    /**
+     * Sets a synchronous provider for custom fields on automatically collected Crash and ANR Errors.
+     * The SDK snapshots this provider during RUM initialization. Changing this config afterwards does
+     * not affect the active SDK instance.
+     *
+     * <p>Setting a provider does not enable Crash or ANR collection. Enable the required automatic
+     * collection sources with {@link #setEnableTrackAppCrash(boolean)} and/or
+     * {@link #setEnableTrackAppANR(boolean)}.</p>
+     *
+     * @param provider provider to invoke, or {@code null} to disable custom issue fields
+     * @return this config for chaining
+     */
+    public FTRUMConfig setIssueDataProvider(@Nullable FTIssueDataProvider provider) {
+        this.issueDataProvider = provider;
+        return this;
+    }
+
+    @Nullable
+    FTIssueDataProvider getIssueDataProvider() {
+        return issueDataProvider;
+    }
+
     /**
      * Returns whether automatic user action tracking is enabled.
      */
@@ -446,16 +498,28 @@ public class FTRUMConfig {
     }
 
     /**
-     * Returns whether automatic OkHttp resource tracking is enabled.
+     * Returns whether supported OkHttp Resource tracking is enabled.
      */
     public boolean isEnableTraceUserResource() {
         return enableTraceUserResource;
     }
 
     /**
-     * Whether to automatically track user network requests, only supports `Okhttp`, default is `false`
+     * Enables automatic OkHttp Resource collection. The default is {@code false}.
      *
-     * @param enableTraceUserResource true to collect supported OkHttp requests automatically
+     * <p>With a compatible {@code ft-plugin} version, this also instruments OkHttp
+     * {@code newWebSocket()} calls and records one Resource for each WebSocket handshake. Without
+     * plug-in instrumentation, use the explicit {@link FTWebSocket} entry points for the same
+     * collection behavior. The Resource ends when the handshake succeeds, is rejected, or fails;
+     * it does not measure the connection lifetime or collect messages.</p>
+     *
+     * <p>Existing Resource URL filtering and RUM sampling rules also apply to WebSocket handshake
+     * Resources. A third-party library that hides both its OkHttp {@code newWebSocket()} call site
+     * and its {@link okhttp3.WebSocket.Factory} requires plug-in instrumentation. WebSocket
+     * implementations that do not use OkHttp are not supported.</p>
+     *
+     * @param enableTraceUserResource {@code true} to collect supported OkHttp HTTP requests and
+     *                                WebSocket handshakes automatically or explicitly
      * @return this config for chaining
      */
     public FTRUMConfig setEnableTraceUserResource(boolean enableTraceUserResource) {

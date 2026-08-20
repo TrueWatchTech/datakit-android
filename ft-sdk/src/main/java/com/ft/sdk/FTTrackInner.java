@@ -1,6 +1,7 @@
 package com.ft.sdk;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.RestrictTo;
 
 import com.ft.sdk.garble.bean.BaseContentBean;
 import com.ft.sdk.garble.bean.CollectType;
@@ -9,7 +10,10 @@ import com.ft.sdk.garble.bean.LineProtocolBean;
 import com.ft.sdk.garble.bean.LogBean;
 import com.ft.sdk.garble.bean.SyncData;
 import com.ft.sdk.garble.db.FTDBCachePolicy;
+import com.ft.sdk.garble.db.FTDataStore;
 import com.ft.sdk.garble.db.FTDataStoreManager;
+import com.ft.sdk.garble.db.HistoricalRumDataStore;
+import com.ft.sdk.garble.db.InsertResult;
 import com.ft.sdk.garble.http.FTResponseData;
 import com.ft.sdk.garble.http.HttpBuilder;
 import com.ft.sdk.garble.http.NetCodeStatus;
@@ -17,10 +21,13 @@ import com.ft.sdk.garble.http.RequestMethod;
 import com.ft.sdk.garble.manager.RequestCallback;
 import com.ft.sdk.garble.threadpool.DataProcessThreadPool;
 import com.ft.sdk.garble.threadpool.RunnerCompleteCallBack;
+import com.ft.sdk.garble.utils.BatteryUtils;
 import com.ft.sdk.garble.utils.Constants;
+import com.ft.sdk.garble.utils.DeviceUtils;
 import com.ft.sdk.garble.utils.HashMapUtils;
 import com.ft.sdk.garble.utils.LogUtils;
 import com.ft.sdk.garble.utils.Utils;
+import com.ft.sdk.internal.anr.historical.HistoricalAnrDataId;
 
 import org.json.JSONObject;
 
@@ -28,6 +35,8 @@ import java.security.InvalidParameterException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 /**
  * author: huangDianHua
@@ -86,8 +95,91 @@ public class FTTrackInner {
         dataHelper.initRUMConfig(config);
     }
 
+    @RestrictTo(RestrictTo.Scope.LIBRARY)
+    public InsertResult persistHistoricalRum(long occurredAtNs,
+                                             HashMap<String, Object> tags,
+                                             HashMap<String, Object> fields,
+                                             String dedupeKey,
+                                             String viewId,
+                                             CollectType collectType) {
+        try {
+            if (collectType == CollectType.NOT_COLLECT) {
+                return InsertResult.ALREADY_EXISTS;
+            }
+            HashMap<String, Object> eventTags =
+                    FTRUMConfigManager.get().getRUMPublicDynamicTags();
+            eventTags.putAll(tags);
+            eventTags.put(Constants.KEY_DEVICE_LOCALE, Locale.getDefault());
+            eventTags.put(Constants.KEY_DEVICE_CARRIER,
+                    DeviceUtils.getCarrier(FTApplication.getApplication()));
+
+            if (FTMonitorManager.get().isErrorMonitorType(ErrorMonitorType.MEMORY)) {
+                double[] memory = DeviceUtils.getRamData(FTApplication.getApplication());
+                eventTags.put(Constants.KEY_MEMORY_TOTAL, memory[0] + "GB");
+                fields.put(Constants.KEY_MEMORY_USE, memory[1]);
+            }
+            if (FTMonitorManager.get().isErrorMonitorType(ErrorMonitorType.CPU)) {
+                fields.put(Constants.KEY_CPU_USE, DeviceUtils.getCpuUsage());
+            }
+            if (FTMonitorManager.get().isErrorMonitorType(ErrorMonitorType.BATTERY)) {
+                fields.put(Constants.KEY_BATTERY_USE,
+                        (float) BatteryUtils.getBatteryInfo(FTApplication.getApplication()).getUsage());
+            }
+
+            SyncData recordData = SyncData.getSyncData(
+                    dataHelper,
+                    historicalRumDataType(collectType),
+                    new LineProtocolBean(
+                            Constants.FT_MEASUREMENT_RUM_ERROR,
+                            eventTags,
+                            fields,
+                            occurredAtNs),
+                    0);
+            if (recordData == null) {
+                return InsertResult.FAILED;
+            }
+            if (!HistoricalAnrDataId.canonicalize(dedupeKey, recordData)) {
+                return InsertResult.FAILED;
+            }
+            FTDataStore store = FTDataStoreManager.get();
+            if (!(store instanceof HistoricalRumDataStore)) {
+                return InsertResult.FAILED;
+            }
+            InsertResult result = ((HistoricalRumDataStore) store)
+                    .prepareHistoricalRum(dedupeKey, viewId, recordData);
+            return result;
+        } catch (Exception e) {
+            LogUtils.e(TAG, LogUtils.getStackTraceString(e));
+            return InsertResult.FAILED;
+        }
+    }
+
+    static DataType historicalRumDataType(CollectType collectType) {
+        return collectType == CollectType.COLLECT_BY_ERROR_SAMPLE
+                ? DataType.RUM_APP_ERROR_SAMPLED
+                : DataType.RUM_APP;
+    }
+
+    @RestrictTo(RestrictTo.Scope.LIBRARY)
+    public InsertResult commitHistoricalRum(String dedupeKey, CollectType collectType) {
+        FTDataStore store = FTDataStoreManager.get();
+        if (!(store instanceof HistoricalRumDataStore)) {
+            return InsertResult.FAILED;
+        }
+        InsertResult result = ((HistoricalRumDataStore) store).commitHistoricalRum(
+                dedupeKey, historicalRumDataType(collectType));
+        if (result != InsertResult.FAILED) {
+            SyncTaskManager.get().executeSyncPoll();
+        }
+        return result;
+    }
+
     HashMap<String, Object> getSessionReplayRUMLinksKeys(String[] links) {
         return dataHelper.checkSessionReplayRUMLinksKeys(links);
+    }
+
+    Set<String> getRUMReservedKeys() {
+        return dataHelper.getRUMReservedKeys();
     }
 
     /**
