@@ -9,6 +9,7 @@ import com.ft.sdk.sessionreplay.SlotIdWebviewBinder;
 import com.ft.sdk.sessionreplay.internal.async.ResourceRecordedDataQueueItem;
 import com.ft.sdk.sessionreplay.internal.async.SnapshotRecordedDataQueueItem;
 import com.ft.sdk.sessionreplay.internal.async.TouchEventRecordedDataQueueItem;
+import com.ft.sdk.sessionreplay.internal.async.ViewEndRecordedDataQueueItem;
 import com.ft.sdk.sessionreplay.internal.persistence.TrackingConsent;
 import com.ft.sdk.sessionreplay.internal.recorder.Node;
 import com.ft.sdk.sessionreplay.internal.resources.ResourceDataStoreManager;
@@ -33,6 +34,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class RecordedDataProcessor implements Processor {
 
@@ -47,6 +49,7 @@ public class RecordedDataProcessor implements Processor {
     private List<Wireframe> prevSnapshot = new LinkedList<>();
     private long lastSnapshotTimestamp = 0L;
     private boolean forceNewNextViewForLinkView = false;
+    private final AtomicLong forceFullSnapshotAfterTimestampNs = new AtomicLong(0L);
     private int previousOrientation = Configuration.ORIENTATION_UNDEFINED;
     private final boolean enableRUMKeysLink;
     private SessionReplayRumContext prevRumContext = new SessionReplayRumContext();
@@ -107,6 +110,7 @@ public class RecordedDataProcessor implements Processor {
         handleSnapshots(
                 item.getRecordedQueuedItemContext().getNewRumContext(),
                 item.getRecordedQueuedItemContext().getTimestamp(),
+                item.getCreationTimeStampInNs(),
                 item.getNodes(),
                 item.getSystemInformation()
         );
@@ -122,6 +126,18 @@ public class RecordedDataProcessor implements Processor {
         );
     }
 
+    @WorkerThread
+    public void processViewEnd(ViewEndRecordedDataQueueItem item) {
+        handleViewEndRecord(item.getTimestamp());
+        prevRumContext = new SessionReplayRumContext();
+        prevSnapshot = new LinkedList<>();
+        previousOrientation = Configuration.ORIENTATION_UNDEFINED;
+        forceNewNextViewForLinkView = false;
+        if (slotIdWebviewBinder != null) {
+            slotIdWebviewBinder.setAllInactive();
+        }
+    }
+
     // Internal methods
 
     @WorkerThread
@@ -135,6 +151,7 @@ public class RecordedDataProcessor implements Processor {
 
     @WorkerThread
     private void handleSnapshots(SessionReplayRumContext newRumContext, long timestamp,
+                                 long creationTimestampNs,
                                  List<Node> snapshots, SystemInformation systemInformation) {
         List<Wireframe> wireframes = new LinkedList<>();
         for (Node node : snapshots) {
@@ -151,7 +168,12 @@ public class RecordedDataProcessor implements Processor {
         boolean isTimeForFullSnapshot = isTimeForFullSnapshot();
         boolean screenOrientationChanged = systemInformation.getScreenOrientation() != previousOrientation;
         boolean isSessionReplayErrorSampled = sdkCore.getConsentProvider() == TrackingConsent.SAMPLED_ON_ERROR_SESSION;
-        boolean fullSnapshotRequired = isNewView || isTimeForFullSnapshot || screenOrientationChanged;
+        long forceAfterTimestampNs = forceFullSnapshotAfterTimestampNs.get();
+        boolean forceFullSnapshot = forceAfterTimestampNs > 0L
+                && creationTimestampNs >= forceAfterTimestampNs
+                && forceFullSnapshotAfterTimestampNs.compareAndSet(forceAfterTimestampNs, 0L);
+        boolean fullSnapshotRequired = isNewView || isTimeForFullSnapshot || screenOrientationChanged
+                || forceFullSnapshot;
 
 
         if (isNewView) {
@@ -255,6 +277,10 @@ public class RecordedDataProcessor implements Processor {
 
     public void forceNewNextViewForLinkView() {
         forceNewNextViewForLinkView = true;
+    }
+
+    public void forceFullSnapshot() {
+        forceFullSnapshotAfterTimestampNs.set(System.nanoTime());
     }
 
     private void handleViewEndRecord(long timestamp) {

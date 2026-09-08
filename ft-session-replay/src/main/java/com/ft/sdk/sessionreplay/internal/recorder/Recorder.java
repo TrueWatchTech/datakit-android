@@ -11,4 +11,8 @@ public interface Recorder {
     void resumeRecorders();
 
     void stopRecorders();
+
+    void stopRecordersAndCloseCurrentView();
+
+    void forceFullSnapshot();
 }

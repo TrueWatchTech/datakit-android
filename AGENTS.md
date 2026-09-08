@@ -87,7 +87,7 @@ replace the published-version bootstrap step.
 ## Cross-Repository Session Replay Debugging
 
 - For WebView Session Replay playback failures, blank playback, missing content, malformed events, or mobile event compatibility issues, do not inspect the Android producer path in isolation.
-- Use `/Users/Brandon/Documents/workplace/WebProject/truewatch-forethought-webclient/docs/session-replay-reference.md` as the stable index and an evidence source for the TrueWatch Web query, mobile-event transformation, and Replayer consumption path.
+- Use the locally available Web client Session Replay reference documentation as the stable index and an evidence source for the TrueWatch Web query, mobile-event transformation, and Replayer consumption path.
 - Correlate the Android path in `FTWebViewHandler`, `SessionReplayBridge`, `ft-session-replay/webview/DataBatcher`, `WebViewWireframeMapper`, and `SlotIdWebviewBinder` with the Web paths indexed by that reference, especially `Player.vue`, `MobileSessionReplay/transformers.ts`, and `Replayer/index.ts`.
 - Compare the emitted NDJSON event types and payloads together with `applicationId`, `sessionId`, `viewId`, `slotId`, container linkage, timestamps, full snapshots, incremental snapshots, and resource URLs before deciding whether the fault is in Web recording, the Android bridge/batching/storage path, the query API, mobile transformation, or the Web Replayer.
 - Treat the reference document as a navigation and evidence anchor, not as proof that the current implementation still behaves exactly as documented. When behavior details matter, inspect the current Web source files referenced by the document and note the branch or commit used.
