@@ -11,6 +11,8 @@ import com.ft.sdk.garble.utils.LogUtils;
 import com.ft.sdk.garble.utils.Utils;
 
 import java.util.HashMap;
+import java.util.IdentityHashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -42,6 +44,9 @@ class FTAppStartCounter {
      * Flag indicating whether the first frame has been drawn
      */
     private final AtomicBoolean firstDrawDone = new AtomicBoolean(false);
+
+    /** Pending candidates, confined to the main thread and released on pause/destroy or completion. */
+    private final Map<Activity, FirstDrawDoneListener> firstDrawListeners = new IdentityHashMap<>();
 
     /**
      * Startup start timestamp for duration, unit: nanoseconds
@@ -88,6 +93,10 @@ class FTAppStartCounter {
      */
     private boolean launchFromBackground = false;
 
+    private boolean foregroundDuringLaunch = false;
+
+    private boolean backgroundDuringLaunch = false;
+
 
     private FTAppStartCounter() {
     }
@@ -108,6 +117,7 @@ class FTAppStartCounter {
      * @param coldStartEndTimeLine
      */
     void coldStart(long coldStartEndTimeLine) {
+        firstDrawDone.set(true);
         this.coldStartTimeLineForNanoDuration = Utils.getAppStartTimeNs();
         this.coldStartDuration = coldStartEndTimeLine - coldStartTimeLineForNanoDuration;
         this.coldStartTimeLine = Utils.getCurrentNanoTime() - coldStartDuration;
@@ -118,7 +128,8 @@ class FTAppStartCounter {
 
         LogUtils.d(TAG, "coldStart:" + coldStartDuration
                 + ",coldTimeLine:" + coldStartTimeLineForNanoDuration
-                + ",launchFromBackground:" + launchFromBackground);
+                + ",launchFromBackground:" + launchFromBackground
+                + ",appLaunchType:" + getColdStartLaunchType());
     }
 
     void checkFirstActivityPreCreate(long nanoTimeLine) {
@@ -130,11 +141,31 @@ class FTAppStartCounter {
     }
 
     void checkFirstFrameStart(Activity activity, Runnable drawDoneCallback) {
-        if (!firstDrawDone.getAndSet(true)) {
-            View rootView = activity.findViewById(android.R.id.content);
-            if (rootView != null) {
-                FirstDrawDoneListener.registerForNextDraw(rootView, drawDoneCallback);
-            }
+        onAppForeground();
+        if (firstDrawDone.get() || firstDrawListeners.containsKey(activity)) {
+            return;
+        }
+        View rootView = activity.findViewById(android.R.id.content);
+        if (rootView != null) {
+            firstDrawListeners.put(activity,
+                    FirstDrawDoneListener.registerForNextDrawCancellable(rootView, () -> {
+                        // Registration is only an attempt. Any later Activity may supply the first draw.
+                        if (firstDrawDone.compareAndSet(false, true)) {
+                            for (FirstDrawDoneListener listener : firstDrawListeners.values()) {
+                                listener.cancel();
+                            }
+                            firstDrawListeners.clear();
+                            drawDoneCallback.run();
+                        }
+                    }));
+        }
+    }
+
+    /** Release an Activity that leaves the foreground without drawing; later candidates may retry. */
+    void cancelFirstFrame(Activity activity) {
+        FirstDrawDoneListener listener = firstDrawListeners.remove(activity);
+        if (listener != null) {
+            listener.cancel();
         }
     }
 
@@ -175,7 +206,7 @@ class FTAppStartCounter {
                 preApplicationInit,
                 applicationInit,
                 firstFrameInit,
-                launchFromBackground);
+                getColdStartLaunchType());
         coldStartDuration = 0;
     }
 
@@ -208,7 +239,8 @@ class FTAppStartCounter {
      * @param nanoTimeLine Application.onCreate() timestamp, unit: nanoseconds
      */
     void appOnCreate(long nanoTimeLine, Application application) {
-        if (!firstDrawDone.get()) {
+        // Repeated Application hooks must preserve the first launch snapshot.
+        if (!firstDrawDone.get() && applicationOnCreateTimeLine == 0) {
             applicationOnCreateTimeLine = nanoTimeLine;
             launchFromBackground = isLaunchFromBackground(application);
             LogUtils.d(TAG, "appOnCreate:" + nanoTimeLine
@@ -226,11 +258,39 @@ class FTAppStartCounter {
             applicationOnCreateCompletedTimeLine = nanoTimeLine;
             LogUtils.d(TAG, "appOnCreateCompleted:" + nanoTimeLine
                     + ",firstActivityPreCreate:" + firstActivityPreOnActivityTimeline);
-            if (firstActivityPreOnActivityTimeline == 0) {
+            if (firstActivityPreOnActivityTimeline == 0 && !foregroundDuringLaunch) {
                 launchFromBackground = true;
                 LogUtils.d(TAG, "launchFromBackground:true,noActivityAfterApplication");
             }
         }
+    }
+
+    /**
+     * Records app-wide lifecycle changes until the cold-start measurement ends.
+     */
+    void onAppForeground() {
+        if (!firstDrawDone.get()) {
+            foregroundDuringLaunch = true;
+        }
+    }
+
+    void onAppBackground() {
+        if (!firstDrawDone.get()) {
+            backgroundDuringLaunch = true;
+        }
+    }
+
+    String getColdStartLaunchType() {
+        // Entering the foreground to draw does not change a background-origin launch.
+        if (launchFromBackground) {
+            return Constants.APP_LAUNCH_TYPE_BACKGROUND;
+        }
+        boolean hasForeground = foregroundDuringLaunch || applicationOnCreateTimeLine != 0;
+        if (hasForeground && backgroundDuringLaunch) {
+            return Constants.APP_LAUNCH_TYPE_FOREGROUND_AND_BACKGROUND;
+        }
+        return backgroundDuringLaunch ? Constants.APP_LAUNCH_TYPE_BACKGROUND
+                : Constants.APP_LAUNCH_TYPE_FOREGROUND;
     }
 
     private boolean isLaunchFromBackground(Application application) {

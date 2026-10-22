@@ -80,6 +80,11 @@ public class FTFileDataStore implements FTDataStore, HistoricalRumDataStore {
     }
 
     @Override
+    public void updateActionExtraAttr(String actionId, String attr) {
+        rumStore.updateActionExtraAttr(actionId, attr);
+    }
+
+    @Override
     public void closeAction(String actionId, long duration, boolean force) {
         rumStore.closeAction(actionId, duration, force);
         updateFileSizeCache();
@@ -219,6 +224,15 @@ public class FTFileDataStore implements FTDataStore, HistoricalRumDataStore {
     public InsertResult prepareHistoricalRum(@NonNull String dedupeKey,
                                              @NonNull String viewId,
                                              @NonNull SyncData data) {
+        return prepareHistoricalRum(dedupeKey, viewId, data, 0, false);
+    }
+
+    @Override
+    public InsertResult prepareHistoricalRum(@NonNull String dedupeKey,
+                                             @NonNull String viewId,
+                                             @NonNull SyncData data,
+                                             long viewTimeSpentNs,
+                                             boolean closeView) {
         if (!HistoricalAnrDataId.canonicalize(dedupeKey, data)) {
             return InsertResult.FAILED;
         }
@@ -226,7 +240,8 @@ public class FTFileDataStore implements FTDataStore, HistoricalRumDataStore {
         if (insertResult == InsertResult.FAILED) {
             return InsertResult.FAILED;
         }
-        InsertResult countResult = rumStore.increaseViewErrorOnce(viewId, dedupeKey);
+        InsertResult countResult = rumStore.updateHistoricalViewOnce(
+                viewId, dedupeKey, viewTimeSpentNs, closeView);
         updateFileSizeCache();
         return countResult == InsertResult.FAILED ? InsertResult.FAILED : insertResult;
     }

@@ -3,6 +3,8 @@ package com.ft.sdk;
 import com.ft.sdk.garble.FTHttpConfigManager;
 
 import java.lang.ref.WeakReference;
+import java.io.IOException;
+import java.net.Proxy;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLConnection;
@@ -19,6 +21,24 @@ public final class FTURLConnectionInstrumentation {
     private static final ArrayList<Entry> CONNECTIONS = new ArrayList<>();
 
     private FTURLConnectionInstrumentation() { }
+
+    /** Opens the platform connection and observes Resource/Trace when configured.
+     * URLConnection Visitor ID headers are deliberately unsupported: the public API
+     * cannot filter every redirect without taking over the application's transport.
+     */
+    public static URLConnection openConnection(URL url) throws IOException {
+        return wrap(url.openConnection());
+    }
+
+    /** The platform retains the original explicit proxy, redirects and cancellation. */
+    public static URLConnection openConnection(URL url, Proxy proxy) throws IOException {
+        return wrap(url.openConnection(proxy));
+    }
+
+    /** Binary-compatible Plugin hook; the SDK never reopens a redirected connection. */
+    public static URLConnection wrap(URLConnection connection, Proxy proxy) {
+        return wrap(connection);
+    }
 
     public static URLConnection wrap(URLConnection connection) {
         if (!(connection instanceof HttpURLConnection)

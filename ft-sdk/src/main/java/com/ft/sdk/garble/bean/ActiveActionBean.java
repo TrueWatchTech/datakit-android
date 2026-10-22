@@ -10,6 +10,8 @@ import com.ft.sdk.garble.utils.Utils;
  * @author Brandon
  */
 public class ActiveActionBean extends ActionBean {
+    /** Process-local guard against retrying an already generated aggregate. */
+    public volatile boolean summaryGenerated;
     /**
      * Wait timeout
      */
@@ -50,6 +52,7 @@ public class ActiveActionBean extends ActionBean {
      * Close active state
      */
     public void close() {
+        if (isClose) return;
         this.isClose = true;
         duration = System.nanoTime() - startTimeNanoForDuration;
 //        if (duration > ACTION_NEED_WAIT_TIME_OUT) {
@@ -68,6 +71,7 @@ public class ActiveActionBean extends ActionBean {
      */
     public ActionBean convertToActionBean() {
         ActionBean bean = new ActionBean();
+        bean.interactionStopTimeNano = this.interactionStopTimeNano;
         bean.id = this.id;
         bean.startTime = this.startTime;
         bean.startTimeNanoForDuration = this.startTimeNanoForDuration;
@@ -79,6 +83,7 @@ public class ActiveActionBean extends ActionBean {
         bean.resourceCount = this.resourceCount;
         bean.isClose = this.isClose;
         bean.sessionId = this.sessionId;
+        bean.sessionStartReason = this.sessionStartReason;
         bean.viewId = this.viewId;
         bean.viewName = this.viewName;
         bean.viewReferrer = this.viewReferrer;

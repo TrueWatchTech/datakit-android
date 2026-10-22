@@ -51,7 +51,7 @@ class LifeCircleTraceCallback {
     /**
      * Cache creation time point
      */
-    private final LinkedHashMap<Context, Long> mCreateMap = new LinkedHashMap<>();
+    private final LinkedHashMap<Context, long[]> mCreateMap = new LinkedHashMap<>();
 
     /**
      * Used to send delayed messages, execute sleep {@link #alreadySleep} = true operation after 10 seconds
@@ -87,7 +87,7 @@ class LifeCircleTraceCallback {
      * @param context
      */
     public void onPreOnCreate(Context context) {
-        mCreateMap.put(context, System.nanoTime());
+        mCreateMap.put(context, new long[]{System.nanoTime(), Utils.getCurrentNanoTime()});
         FTAppStartCounter.get().checkFirstActivityPreCreate(System.nanoTime());
         if (!mInited) {
 //            FTAutoTrack.startApp();
@@ -108,19 +108,19 @@ class LifeCircleTraceCallback {
 
         if (manager.isRumEnable()) {
             if (config.isEnableTraceUserView()) {
-                Long startTime = mCreateMap.get(context);
+                long[] startTime = mCreateMap.get(context);
                 if (startTime != null) {
-                    long durationNS = System.nanoTime() - startTime;
+                    long durationNS = System.nanoTime() - startTime[0];
                     String viewName = AopUtils.getClassName(context);
                     FTViewActivityTrackingHandler handler = config.getViewActivityTrackingHandler();
                     if (handler != null) {
                         HandlerView handlerView = config.getViewActivityTrackingHandler()
                                 .resolveHandlerView((Activity) context);
                         if (handlerView != null) {
-                            FTRUMInnerManager.get().onCreateView(handlerView.getViewName(), durationNS);
+                            FTRUMInnerManager.get().onCreateView(handlerView.getViewName(), durationNS, startTime[1]);
                         }
                     } else {
-                        FTRUMInnerManager.get().onCreateView(viewName, durationNS);
+                        FTRUMInnerManager.get().onCreateView(viewName, durationNS, startTime[1]);
                     }
 
                 }
@@ -145,19 +145,18 @@ class LifeCircleTraceCallback {
         FTRUMConfigManager manager = FTRUMConfigManager.get();
         FTRUMConfig config = manager.getConfig();
 
-        if (!mInited) {
-            FTAppStartCounter.get().checkFirstFrameStart(activity, new Runnable() {
-                @Override
-                public void run() {
-                    FTAppStartCounter.get().coldStart(System.nanoTime());
-                    if (manager.isRumEnable() && config.isEnableTraceUserAction()) {
-                        // If SDK is not initialized, this data will be supplemented
-                        // after SDK delayed initialization
-                        FTAppStartCounter.get().coldStartUpload();
-                    }
+        FTAppStartCounter.get().checkFirstFrameStart(activity, new Runnable() {
+            @Override
+            public void run() {
+                FTAppStartCounter.get().coldStart(System.nanoTime());
+                // RUM may have been initialized after this Activity resumed.
+                FTRUMConfigManager currentManager = FTRUMConfigManager.get();
+                if (currentManager.isRumEnable()
+                        && currentManager.getConfig().isEnableTraceUserAction()) {
+                    FTAppStartCounter.get().coldStartUpload();
                 }
-            });
-        }
+            }
+        });
 
         // Already sleeping
         if (alreadySleep) {
@@ -202,6 +201,9 @@ class LifeCircleTraceCallback {
      * @param context
      */
     public void onPostDestroy(Context context) {
+        if (context instanceof Activity) {
+            FTAppStartCounter.get().cancelFirstFrame((Activity) context);
+        }
         mCreateMap.remove(context);
         if (mCreateMap.isEmpty()) {
             mInited = false;

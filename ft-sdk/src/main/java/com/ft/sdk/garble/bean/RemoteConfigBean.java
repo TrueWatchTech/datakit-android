@@ -15,8 +15,14 @@ public class RemoteConfigBean {
     public static final String KEY_COMPRESS_INTAKE_REQUESTS = "compressIntakeRequests";
     public static final String KEY_SYNC_PAGE_SIZE = "syncPageSize";
     public static final String KEY_SYNC_SLEEP_TIME = "syncSleepTime";
+    /** @deprecated Use KEY_SESSION_SAMPLING_RATE (percentage). */
+    @Deprecated
     public static final String KEY_RUM_SAMPLE_RATE = "rumSampleRate";
+    public static final String KEY_SESSION_SAMPLING_RATE = "sessionSamplingRate";
+    /** @deprecated Use KEY_SESSION_ON_ERROR_SAMPLING_RATE (percentage). */
+    @Deprecated
     public static final String KEY_RUM_SESSION_ON_ERROR_SAMPLE_RATE = "rumSessionOnErrorSampleRate";
+    public static final String KEY_SESSION_ON_ERROR_SAMPLING_RATE = "sessionOnErrorSamplingRate";
     public static final String KEY_RUM_ENABLE_TRACE_USER_ACTION = "rumEnableTraceUserAction";
     public static final String KEY_RUM_ENABLE_TRACE_USER_VIEW = "rumEnableTraceUserView";
     public static final String KEY_RUM_ENABLE_TRACE_USER_RESOURCE = "rumEnableTraceUserResource";
@@ -27,16 +33,28 @@ public class RemoteConfigBean {
     public static final String KEY_RUM_ENABLE_TRACK_APP_ANR = "rumEnableTrackAppANR";
     public static final String KEY_RUM_ENABLE_TRACE_WEB_VIEW = "rumEnableTraceWebView";
     public static final String KEY_RUM_ALLOW_WEB_VIEW_HOST = "rumAllowWebViewHost";
+    /** @deprecated Use KEY_LOG_SAMPLING_RATE (percentage). */
+    @Deprecated
     public static final String KEY_LOG_SAMPLE_RATE = "logSampleRate";
+    public static final String KEY_LOG_SAMPLING_RATE = "logSamplingRate";
     public static final String KEY_LOG_LEVEL_FILTERS = "logLevelFilters";
     public static final String KEY_LOG_ENABLE_CUSTOM_LOG = "logEnableCustomLog";
     public static final String KEY_LOG_ENABLE_CONSOLE_LOG = "logEnableConsoleLog";
     public static final String KEY_LOG_ENABLE_WEB_VIEW_LOG = "logEnableWebViewLog";
+    /** @deprecated Use KEY_TRACE_SAMPLING_RATE (percentage). */
+    @Deprecated
     public static final String KEY_TRACE_SAMPLE_RATE = "traceSampleRate";
+    public static final String KEY_TRACE_SAMPLING_RATE = "traceSamplingRate";
     public static final String KEY_TRACE_ENABLE_AUTO_TRACE = "traceEnableAutoTrace";
     public static final String KEY_TRACE_TYPE = "traceType";
+    /** @deprecated Use KEY_SESSION_REPLAY_SAMPLING_RATE (percentage). */
+    @Deprecated
     public static final String KEY_SESSION_REPLAY_SAMPLE_RATE = "sessionReplaySampleRate";
+    public static final String KEY_SESSION_REPLAY_SAMPLING_RATE = "sessionReplaySamplingRate";
+    /** @deprecated Use KEY_SESSION_REPLAY_ON_ERROR_SAMPLING_RATE (percentage). */
+    @Deprecated
     public static final String KEY_SESSION_REPLAY_ON_ERROR_SAMPLE_RATE = "sessionReplayOnErrorSampleRate";
+    public static final String KEY_SESSION_REPLAY_ON_ERROR_SAMPLING_RATE = "sessionReplayOnErrorSamplingRate";
     public static final String KEY_ENV = "env";
     public static final String KEY_MD5 = "md5";
 
@@ -48,7 +66,9 @@ public class RemoteConfigBean {
     private Integer syncSleepTime;
 
     private Float rumSampleRate;
+    private boolean rumSampleRatePercentageSet;
     private Float rumSessionOnErrorSampleRate;
+    private boolean rumSessionOnErrorSampleRatePercentageSet;
     private Boolean rumEnableTraceUserAction;
     private Boolean rumEnableTraceUserView;
     private Boolean rumEnableTraceUserResource;
@@ -61,17 +81,21 @@ public class RemoteConfigBean {
     private String[] rumAllowWebViewHost;
 
     private Float logSampleRate;
+    private boolean logSampleRatePercentageSet;
     private String[] logLevelFilters;
     private Boolean logEnableCustomLog;
     private Boolean logEnableConsoleLog;
     private Boolean logEnableWebViewLog;
 
     private Float traceSampleRate;
+    private boolean traceSampleRatePercentageSet;
     private Boolean traceEnableAutoTrace;
     private String traceType;
 
     private Float sessionReplaySampleRate;
+    private boolean sessionReplaySampleRatePercentageSet;
     private Float sessionReplayOnErrorSampleRate;
+    private boolean sessionReplayOnErrorSampleRatePercentageSet;
     private String md5;
     private boolean isValid = false;
     private String contentJsonString;
@@ -113,6 +137,24 @@ public class RemoteConfigBean {
         return obj.has(key) && obj.opt(key) instanceof String;
     }
 
+    private Float parseSamplingRate(JSONObject content, String percentageKey, String legacyKey) {
+        if (content.has(percentageKey)) {
+            Object value = content.opt(percentageKey);
+            if (value instanceof Number) {
+                double percentage = ((Number) value).doubleValue();
+                if (!Double.isNaN(percentage) && !Double.isInfinite(percentage)
+                        && percentage >= 0d && percentage <= 100d) {
+                    return (float) (percentage / 100d);
+                }
+            }
+            LogUtils.e(TAG, percentageKey + " must be a finite number in [0, 100]; ignoring update");
+            // An invalid new key must not silently fall back to a conflicting legacy key.
+            return null;
+        }
+        // Preserve the parsing behavior of released 0..1 configuration keys.
+        return isNumber(content, legacyKey) ? (float) content.optDouble(legacyKey) : null;
+    }
+
     void parse(String data) {
         try {
             if (data == null) return;
@@ -132,8 +174,8 @@ public class RemoteConfigBean {
             if (isBoolean(content, KEY_COMPRESS_INTAKE_REQUESTS)) compressIntakeRequests = content.optBoolean(KEY_COMPRESS_INTAKE_REQUESTS);
             if (isNumber(content, KEY_SYNC_PAGE_SIZE)) syncPageSize = content.optInt(KEY_SYNC_PAGE_SIZE);
             if (isNumber(content, KEY_SYNC_SLEEP_TIME)) syncSleepTime = content.optInt(KEY_SYNC_SLEEP_TIME);
-            if (isNumber(content, KEY_RUM_SAMPLE_RATE)) rumSampleRate = (float) content.optDouble(KEY_RUM_SAMPLE_RATE);
-            if (isNumber(content, KEY_RUM_SESSION_ON_ERROR_SAMPLE_RATE)) rumSessionOnErrorSampleRate = (float) content.optDouble(KEY_RUM_SESSION_ON_ERROR_SAMPLE_RATE);
+            rumSampleRate = parseSamplingRate(content, KEY_SESSION_SAMPLING_RATE, KEY_RUM_SAMPLE_RATE);
+            rumSessionOnErrorSampleRate = parseSamplingRate(content, KEY_SESSION_ON_ERROR_SAMPLING_RATE, KEY_RUM_SESSION_ON_ERROR_SAMPLE_RATE);
             if (isBoolean(content, KEY_RUM_ENABLE_TRACE_USER_ACTION)) rumEnableTraceUserAction = content.optBoolean(KEY_RUM_ENABLE_TRACE_USER_ACTION);
             if (isBoolean(content, KEY_RUM_ENABLE_TRACE_USER_VIEW)) rumEnableTraceUserView = content.optBoolean(KEY_RUM_ENABLE_TRACE_USER_VIEW);
             if (isBoolean(content, KEY_RUM_ENABLE_TRACE_USER_RESOURCE)) rumEnableTraceUserResource = content.optBoolean(KEY_RUM_ENABLE_TRACE_USER_RESOURCE);
@@ -165,7 +207,7 @@ public class RemoteConfigBean {
                 LogUtils.e(TAG, KEY_RUM_ALLOW_WEB_VIEW_HOST + " is not a valid JSONArray or String");
             }
 
-            if (isNumber(content, KEY_LOG_SAMPLE_RATE)) logSampleRate = (float) content.optDouble(KEY_LOG_SAMPLE_RATE);
+            logSampleRate = parseSamplingRate(content, KEY_LOG_SAMPLING_RATE, KEY_LOG_SAMPLE_RATE);
 
             Object logFilterObj = content.opt(KEY_LOG_LEVEL_FILTERS);
             if (logFilterObj instanceof String) {
@@ -191,11 +233,11 @@ public class RemoteConfigBean {
             if (isBoolean(content, KEY_LOG_ENABLE_CUSTOM_LOG)) logEnableCustomLog = content.optBoolean(KEY_LOG_ENABLE_CUSTOM_LOG);
             if (isBoolean(content, KEY_LOG_ENABLE_CONSOLE_LOG)) logEnableConsoleLog = content.optBoolean(KEY_LOG_ENABLE_CONSOLE_LOG);
             if (isBoolean(content, KEY_LOG_ENABLE_WEB_VIEW_LOG)) logEnableWebViewLog = content.optBoolean(KEY_LOG_ENABLE_WEB_VIEW_LOG);
-            if (isNumber(content, KEY_TRACE_SAMPLE_RATE)) traceSampleRate = (float) content.optDouble(KEY_TRACE_SAMPLE_RATE);
+            traceSampleRate = parseSamplingRate(content, KEY_TRACE_SAMPLING_RATE, KEY_TRACE_SAMPLE_RATE);
             if (isBoolean(content, KEY_TRACE_ENABLE_AUTO_TRACE)) traceEnableAutoTrace = content.optBoolean(KEY_TRACE_ENABLE_AUTO_TRACE);
             if (isString(content, KEY_TRACE_TYPE)) traceType = content.optString(KEY_TRACE_TYPE);
-            if (isNumber(content, KEY_SESSION_REPLAY_SAMPLE_RATE)) sessionReplaySampleRate = (float) content.optDouble(KEY_SESSION_REPLAY_SAMPLE_RATE);
-            if (isNumber(content, KEY_SESSION_REPLAY_ON_ERROR_SAMPLE_RATE)) sessionReplayOnErrorSampleRate = (float) content.optDouble(KEY_SESSION_REPLAY_ON_ERROR_SAMPLE_RATE);
+            sessionReplaySampleRate = parseSamplingRate(content, KEY_SESSION_REPLAY_SAMPLING_RATE, KEY_SESSION_REPLAY_SAMPLE_RATE);
+            sessionReplayOnErrorSampleRate = parseSamplingRate(content, KEY_SESSION_REPLAY_ON_ERROR_SAMPLING_RATE, KEY_SESSION_REPLAY_ON_ERROR_SAMPLE_RATE);
 
             isValid = true;
         } catch (Exception e) {
@@ -227,10 +269,19 @@ public class RemoteConfigBean {
         return syncSleepTime;
     }
 
+    /** Returns the effective percentage, or null when no valid update is present. */
+    public Float getSessionSamplingRate() {
+        return rumSampleRate == null ? null : rumSampleRate * 100f;
+    }
+
+    /** @deprecated Use getSessionSamplingRate(), in percent. */
+    @Deprecated
     public Float getRumSampleRate() {
         return rumSampleRate;
     }
 
+    /** @deprecated Use getSessionOnErrorSamplingRate(), in percent. */
+    @Deprecated
     public Float getRumSessionOnErrorSampleRate() {
         return rumSessionOnErrorSampleRate;
     }
@@ -267,6 +318,13 @@ public class RemoteConfigBean {
         return rumAllowWebViewHost;
     }
 
+    /** Returns the effective percentage, or null when no valid update is present. */
+    public Float getLogSamplingRate() {
+        return logSampleRate == null ? null : logSampleRate * 100f;
+    }
+
+    /** @deprecated Use getLogSamplingRate(), in percent. */
+    @Deprecated
     public Float getLogSampleRate() {
         return logSampleRate;
     }
@@ -283,6 +341,13 @@ public class RemoteConfigBean {
         return logEnableWebViewLog;
     }
 
+    /** Returns the effective percentage, or null when no valid update is present. */
+    public Float getTraceSamplingRate() {
+        return traceSampleRate == null ? null : traceSampleRate * 100f;
+    }
+
+    /** @deprecated Use getTraceSamplingRate(), in percent. */
+    @Deprecated
     public Float getTraceSampleRate() {
         return traceSampleRate;
     }
@@ -295,10 +360,14 @@ public class RemoteConfigBean {
         return traceType;
     }
 
+    /** @deprecated Use getSessionReplaySamplingRate(), in percent. */
+    @Deprecated
     public Float getSessionReplaySampleRate() {
         return sessionReplaySampleRate;
     }
 
+    /** @deprecated Use getSessionReplayOnErrorSamplingRate(), in percent. */
+    @Deprecated
     public Float getSessionReplayOnErrorSampleRate() {
         return sessionReplayOnErrorSampleRate;
     }
@@ -311,12 +380,16 @@ public class RemoteConfigBean {
         return contentJsonString;
     }
 
+    /** @deprecated Use setSessionReplayOnErrorSamplingRate(float), in percent. */
+    @Deprecated
     public void setSessionReplayOnErrorSampleRate(Float sessionReplayOnErrorSampleRate) {
-        this.sessionReplayOnErrorSampleRate = sessionReplayOnErrorSampleRate;
+        if (!sessionReplayOnErrorSampleRatePercentageSet) this.sessionReplayOnErrorSampleRate = sessionReplayOnErrorSampleRate;
     }
 
+    /** @deprecated Use setSessionReplaySamplingRate(float), in percent. */
+    @Deprecated
     public void setSessionReplaySampleRate(Float sessionReplaySampleRate) {
-        this.sessionReplaySampleRate = sessionReplaySampleRate;
+        if (!sessionReplaySampleRatePercentageSet) this.sessionReplaySampleRate = sessionReplaySampleRate;
     }
 
     public void setTraceType(String traceType) {
@@ -327,8 +400,10 @@ public class RemoteConfigBean {
         this.traceEnableAutoTrace = traceEnableAutoTrace;
     }
 
+    /** @deprecated Use setTraceSamplingRate(float), in percent. */
+    @Deprecated
     public void setTraceSampleRate(Float traceSampleRate) {
-        this.traceSampleRate = traceSampleRate;
+        if (!traceSampleRatePercentageSet) this.traceSampleRate = traceSampleRate;
     }
 
     public void setLogEnableCustomLog(Boolean logEnableCustomLog) {
@@ -343,8 +418,10 @@ public class RemoteConfigBean {
         this.logLevelFilters = logLevelFilters;
     }
 
+    /** @deprecated Use setLogSamplingRate(float), in percent. */
+    @Deprecated
     public void setLogSampleRate(Float logSampleRate) {
-        this.logSampleRate = logSampleRate;
+        if (!logSampleRatePercentageSet) this.logSampleRate = logSampleRate;
     }
 
     public void setRumAllowWebViewHost(String[] rumAllowWebViewHost) {
@@ -379,12 +456,16 @@ public class RemoteConfigBean {
         this.rumEnableTraceUserAction = rumEnableTraceUserAction;
     }
 
+    /** @deprecated Use setSessionOnErrorSamplingRate(float), in percent. */
+    @Deprecated
     public void setRumSessionOnErrorSampleRate(Float rumSessionOnErrorSampleRate) {
-        this.rumSessionOnErrorSampleRate = rumSessionOnErrorSampleRate;
+        if (!rumSessionOnErrorSampleRatePercentageSet) this.rumSessionOnErrorSampleRate = rumSessionOnErrorSampleRate;
     }
 
+    /** @deprecated Use setSessionSamplingRate(float), in percent. */
+    @Deprecated
     public void setRumSampleRate(Float rumSampleRate) {
-        this.rumSampleRate = rumSampleRate;
+        if (!rumSampleRatePercentageSet) this.rumSampleRate = rumSampleRate;
     }
 
     public void setSyncSleepTime(Integer syncSleepTime) {
@@ -409,6 +490,69 @@ public class RemoteConfigBean {
 
     public void setEnv(String env) {
         this.env = env;
+    }
+
+    /** Overrides the remote SessionSamplingRate using a finite percentage in [0,100]. */
+    public void setSessionSamplingRate(float percentage) {
+        if (Float.isNaN(percentage) || Float.isInfinite(percentage) || percentage < 0f || percentage > 100f) {
+            throw new IllegalArgumentException("SessionSamplingRate must be finite and within [0,100]");
+        }
+        rumSampleRate = percentage / 100f;
+        rumSampleRatePercentageSet = true;
+    }
+
+    /** Overrides the remote LogSamplingRate using a finite percentage in [0,100]. */
+    public void setLogSamplingRate(float percentage) {
+        if (Float.isNaN(percentage) || Float.isInfinite(percentage) || percentage < 0f || percentage > 100f) {
+            throw new IllegalArgumentException("LogSamplingRate must be finite and within [0,100]");
+        }
+        logSampleRate = percentage / 100f;
+        logSampleRatePercentageSet = true;
+    }
+
+    /** Overrides the remote TraceSamplingRate using a finite percentage in [0,100]. */
+    public void setTraceSamplingRate(float percentage) {
+        if (Float.isNaN(percentage) || Float.isInfinite(percentage) || percentage < 0f || percentage > 100f) {
+            throw new IllegalArgumentException("TraceSamplingRate must be finite and within [0,100]");
+        }
+        traceSampleRate = percentage / 100f;
+        traceSampleRatePercentageSet = true;
+    }
+
+    /** Returns the remote percentage, or null when absent/invalid. */
+    public Float getSessionOnErrorSamplingRate() { return rumSessionOnErrorSampleRate == null ? null : rumSessionOnErrorSampleRate * 100f; }
+
+    /** Overrides the remote SessionOnErrorSamplingRate using a finite percentage in [0,100]. */
+    public void setSessionOnErrorSamplingRate(float percentage) {
+        if (Float.isNaN(percentage) || Float.isInfinite(percentage) || percentage < 0f || percentage > 100f) {
+            throw new IllegalArgumentException("SessionOnErrorSamplingRate must be finite and within [0,100]");
+        }
+        rumSessionOnErrorSampleRate = percentage / 100f;
+        rumSessionOnErrorSampleRatePercentageSet = true;
+    }
+
+    /** Returns the remote percentage, or null when absent/invalid. */
+    public Float getSessionReplaySamplingRate() { return sessionReplaySampleRate == null ? null : sessionReplaySampleRate * 100f; }
+
+    /** Overrides the remote SessionReplaySamplingRate using a finite percentage in [0,100]. */
+    public void setSessionReplaySamplingRate(float percentage) {
+        if (Float.isNaN(percentage) || Float.isInfinite(percentage) || percentage < 0f || percentage > 100f) {
+            throw new IllegalArgumentException("SessionReplaySamplingRate must be finite and within [0,100]");
+        }
+        sessionReplaySampleRate = percentage / 100f;
+        sessionReplaySampleRatePercentageSet = true;
+    }
+
+    /** Returns the remote percentage, or null when absent/invalid. */
+    public Float getSessionReplayOnErrorSamplingRate() { return sessionReplayOnErrorSampleRate == null ? null : sessionReplayOnErrorSampleRate * 100f; }
+
+    /** Overrides the remote SessionReplayOnErrorSamplingRate using a finite percentage in [0,100]. */
+    public void setSessionReplayOnErrorSamplingRate(float percentage) {
+        if (Float.isNaN(percentage) || Float.isInfinite(percentage) || percentage < 0f || percentage > 100f) {
+            throw new IllegalArgumentException("SessionReplayOnErrorSamplingRate must be finite and within [0,100]");
+        }
+        sessionReplayOnErrorSampleRate = percentage / 100f;
+        sessionReplayOnErrorSampleRatePercentageSet = true;
     }
 
     @Override
@@ -537,9 +681,15 @@ public class RemoteConfigBean {
             }
             if (rumSampleRate != null) {
                 content.put(KEY_RUM_SAMPLE_RATE, rumSampleRate);
+                if (content.has(KEY_SESSION_SAMPLING_RATE) || rumSampleRatePercentageSet) {
+                    content.put(KEY_SESSION_SAMPLING_RATE, rumSampleRate * 100d);
+                }
             }
             if (rumSessionOnErrorSampleRate != null) {
                 content.put(KEY_RUM_SESSION_ON_ERROR_SAMPLE_RATE, rumSessionOnErrorSampleRate);
+                if (content.has(KEY_SESSION_ON_ERROR_SAMPLING_RATE) || rumSessionOnErrorSampleRatePercentageSet) {
+                    content.put(KEY_SESSION_ON_ERROR_SAMPLING_RATE, rumSessionOnErrorSampleRate * 100d);
+                }
             }
             if (rumEnableTraceUserAction != null) {
                 content.put(KEY_RUM_ENABLE_TRACE_USER_ACTION, rumEnableTraceUserAction);
@@ -577,6 +727,9 @@ public class RemoteConfigBean {
             }
             if (logSampleRate != null) {
                 content.put(KEY_LOG_SAMPLE_RATE, logSampleRate);
+                if (content.has(KEY_LOG_SAMPLING_RATE) || logSampleRatePercentageSet) {
+                    content.put(KEY_LOG_SAMPLING_RATE, logSampleRate * 100d);
+                }
             }
             if (logLevelFilters != null) {
                 JSONArray logFilterArray = new JSONArray();
@@ -596,6 +749,9 @@ public class RemoteConfigBean {
             }
             if (traceSampleRate != null) {
                 content.put(KEY_TRACE_SAMPLE_RATE, traceSampleRate);
+                if (content.has(KEY_TRACE_SAMPLING_RATE) || traceSampleRatePercentageSet) {
+                    content.put(KEY_TRACE_SAMPLING_RATE, traceSampleRate * 100d);
+                }
             }
             if (traceEnableAutoTrace != null) {
                 content.put(KEY_TRACE_ENABLE_AUTO_TRACE, traceEnableAutoTrace);
@@ -605,9 +761,15 @@ public class RemoteConfigBean {
             }
             if (sessionReplaySampleRate != null) {
                 content.put(KEY_SESSION_REPLAY_SAMPLE_RATE, sessionReplaySampleRate);
+                if (content.has(KEY_SESSION_REPLAY_SAMPLING_RATE) || sessionReplaySampleRatePercentageSet) {
+                    content.put(KEY_SESSION_REPLAY_SAMPLING_RATE, sessionReplaySampleRate * 100d);
+                }
             }
             if (sessionReplayOnErrorSampleRate != null) {
                 content.put(KEY_SESSION_REPLAY_ON_ERROR_SAMPLE_RATE, sessionReplayOnErrorSampleRate);
+                if (content.has(KEY_SESSION_REPLAY_ON_ERROR_SAMPLING_RATE) || sessionReplayOnErrorSampleRatePercentageSet) {
+                    content.put(KEY_SESSION_REPLAY_ON_ERROR_SAMPLING_RATE, sessionReplayOnErrorSampleRate * 100d);
+                }
             }
 
             json.put("content", content);

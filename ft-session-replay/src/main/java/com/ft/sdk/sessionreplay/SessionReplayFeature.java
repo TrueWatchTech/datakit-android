@@ -82,8 +82,8 @@ public class SessionReplayFeature implements StorageBackedFeature, FeatureEventR
     private final TouchPrivacy touchPrivacy;
     private final TextAndInputPrivacy textAndInputPrivacy;
     private final ImagePrivacy imagePrivacy;
-    private Sampler sessionRelaySampler;
-    private Sampler sessionRelayErrorSampler;
+    private volatile Sampler sessionRelaySampler;
+    private volatile Sampler sessionRelayErrorSampler;
     private final RecorderProvider recorderProvider;
     private final String[] linkRumKeys;
     private final boolean enableNativeRecorder;
@@ -266,10 +266,11 @@ public class SessionReplayFeature implements StorageBackedFeature, FeatureEventR
         sdkCore.updateFeatureContext(getName(), new SessionReplayRecordCallback.UpdateCallBack() {
             @Override
             public void onUpdate(Map<String, Object> context) {
-                context.put(SESSION_REPLAY_SAMPLE_RATE_KEY, sessionRelaySampler.getSampleRate() != null ?
-                        sessionRelaySampler.getSampleRate() : null);
-                context.put(SESSION_REPLAY_ON_ERROR_SAMPLE_RATE_KEY, sessionRelayErrorSampler.getSampleRate() != null ?
-                        sessionRelayErrorSampler.getSampleRate() : null);
+                Float sampleRate = sessionRelaySampler.getSampleRate();
+                Float onErrorSampleRate = sessionRelayErrorSampler.getSampleRate();
+                context.put(SESSION_REPLAY_SAMPLE_RATE_KEY, sampleRate != null ? sampleRate * 100f : null);
+                context.put(SESSION_REPLAY_ON_ERROR_SAMPLE_RATE_KEY,
+                        onErrorSampleRate != null ? onErrorSampleRate * 100f : null);
                 context.put(SESSION_REPLAY_IMAGE_PRIVACY_KEY, imagePrivacy.toString().toLowerCase(Locale.US));
                 context.put(SESSION_REPLAY_TOUCH_PRIVACY_KEY, touchPrivacy.toString().toLowerCase(Locale.US));
                 context.put(SESSION_REPLAY_TEXT_AND_INPUT_PRIVACY_KEY, textAndInputPrivacy.toString().toLowerCase(Locale.US));
@@ -285,18 +286,47 @@ public class SessionReplayFeature implements StorageBackedFeature, FeatureEventR
     }
 
 
+    /** Updates regular Replay sampling using a finite percentage in [0,100]. */
+    public void updateSessionReplaySamplingRate(float percentage) {
+        validateSamplingPercentage(percentage);
+        updateSampleRate(percentage / 100f);
+    }
+
+    /** Updates error-Replay sampling using a finite percentage in [0,100]. */
+    public void updateSessionReplayOnErrorSamplingRate(float percentage) {
+        validateSamplingPercentage(percentage);
+        updateSessionReplayOnErrorSampleRate(percentage / 100f);
+    }
+
+    public float getSessionReplaySamplingRate() { return getSampleRate() * 100f; }
+    public float getSessionReplayOnErrorSamplingRate() { return getSessionReplayOnErrorSampleRate() * 100f; }
+
+    private static void validateSamplingPercentage(float percentage) {
+        if (Float.isNaN(percentage) || Float.isInfinite(percentage) || percentage < 0f || percentage > 100f) {
+            throw new IllegalArgumentException("Sampling percentage must be finite and within [0,100]");
+        }
+    }
+
+    /** @deprecated Use updateSessionReplaySamplingRate, in percent. */
+    @Deprecated
     public void updateSampleRate(float sampleRate) {
         sessionRelaySampler = new RateBasedSampler(sampleRate);
     }
 
+    /** @deprecated Use updateSessionReplayOnErrorSamplingRate, in percent. */
+    @Deprecated
     public void updateSessionReplayOnErrorSampleRate(float sessionReplayOnErrorSampleRate) {
         sessionRelayErrorSampler = new RateBasedSampler(sessionReplayOnErrorSampleRate);
     }
 
+    /** @deprecated Use getSessionReplaySamplingRate, in percent. */
+    @Deprecated
     public float getSampleRate() {
         return sessionRelaySampler.getSampleRate();
     }
 
+    /** @deprecated Use getSessionReplayOnErrorSamplingRate, in percent. */
+    @Deprecated
     public float getSessionReplayOnErrorSampleRate() {
         return sessionRelayErrorSampler.getSampleRate();
     }

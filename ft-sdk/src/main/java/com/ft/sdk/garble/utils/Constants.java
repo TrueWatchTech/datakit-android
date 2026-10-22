@@ -640,6 +640,11 @@ public class Constants {
      * Background crash-free duration, nanoseconds.
      */
     public static final String KEY_RUM_BACKGROUND_CRASH_FREE_DURATION = "background_crash_free_duration";
+    /** Runtime state across the event's original interval. */
+    public static final String KEY_RUM_APP_STATE = "app_state";
+    /** Creation reason of the event's owning Session. */
+    public static final String KEY_RUM_SESSION_START_REASON = "session_start_reason";
+
     /**
      * Long task duration, nanoseconds, {@link #FT_MEASUREMENT_RUM_LONG_TASK}
      */
@@ -683,13 +688,22 @@ public class Constants {
      */
     public static final String KEY_RUM_SESSION_ERROR_TIMESTAMP = "session_error_timestamp";
     /**
-     * Session rum sampling rate
+     * Session RUM sampling percentage in [0,100]
      */
     public static final String KEY_RUM_SESSION_SAMPLE_RATE = "session_sample_rate";
     /**
-     * Session error sampling rate
+     * Session error sampling percentage in [0,100]
      */
     public static final String KEY_RUM_SESSION_ON_ERROR_SAMPLE_RATE = "session_on_error_sample_rate";
+
+    /**
+     * Session replay sampling percentage in [0,100]
+     */
+    public static final String KEY_RUM_SESSION_REPLAY_SAMPLE_RATE = "session_replay_sample_rate";
+    /**
+     * Session replay error sampling percentage in [0,100]
+     */
+    public static final String KEY_RUM_SESSION_REPLAY_ON_ERROR_SAMPLE_RATE = "session_replay_on_error_sample_rate";
 
     /**
      * Session type
@@ -728,6 +742,8 @@ public class Constants {
     /**
      * Page load time
      */
+    public static final String KEY_RUM_VIEW_NETWORK_SETTLED_TIME = "network_settled_time";
+    public static final String KEY_RUM_VIEW_INTERACTION_TO_NEXT_VIEW_TIME = "interaction_to_next_view_time";
     public static final String KEY_RUM_VIEW_LOAD = "loading_time";
     /**
      * Number of long tasks in page cycle, {@link #FT_MEASUREMENT_RUM_LONG_TASK}
@@ -819,6 +835,8 @@ public class Constants {
     public static final String APP_LAUNCH_TYPE_FOREGROUND = "foreground";
 
     public static final String APP_LAUNCH_TYPE_BACKGROUND = "background";
+
+    public static final String APP_LAUNCH_TYPE_FOREGROUND_AND_BACKGROUND = "foreground_and_background";
 
     /**
      * Action cycle content long duration count statistics, {@link Constants#FT_MEASUREMENT_RUM_LONG_TASK}

@@ -1,6 +1,8 @@
 package com.ft.sdk.garble.bean;
 
-import com.ft.sdk.garble.utils.Utils;
+import com.ft.sdk.FTInitialResourceIdentifier;
+import com.ft.sdk.FTTimeBasedInitialResourceIdentifier;
+import com.ft.sdk.internal.metrics.NetworkSettledMetric;
 
 /**
  * Currently active state {@link ViewBean}
@@ -11,6 +13,8 @@ import com.ft.sdk.garble.utils.Utils;
  */
 public class ActiveViewBean extends ViewBean {
 
+    public final NetworkSettledMetric networkSettledMetric;
+
     /**
      * @param name
      * @param viewReferrer
@@ -18,6 +22,12 @@ public class ActiveViewBean extends ViewBean {
      * @param sessionId
      */
     public ActiveViewBean(String name, String viewReferrer, long loadTime, String sessionId) {
+        this(name, viewReferrer, loadTime, sessionId, new FTTimeBasedInitialResourceIdentifier());
+    }
+
+    public ActiveViewBean(String name, String viewReferrer, long loadTime, String sessionId,
+                          FTInitialResourceIdentifier identifier) {
+        networkSettledMetric = new NetworkSettledMetric(getStartTimeNanoForDuration(), identifier);
         this.viewName = name;
         this.viewReferrer = viewReferrer;
         this.loadTime = loadTime;
@@ -28,8 +38,16 @@ public class ActiveViewBean extends ViewBean {
      * Close active state
      */
     public void close() {
+        if (isClose) return;
+        networkSettledMetric.stop();
         this.isClose = true;
         timeSpent = System.nanoTime()- startTimeNanoForDuration;
+    }
+
+    @Override
+    public void setClose(boolean close) {
+        if (close) networkSettledMetric.stop();
+        super.setClose(close);
     }
 
     /**
@@ -39,6 +57,8 @@ public class ActiveViewBean extends ViewBean {
      */
     public ViewBean convertToViewBean() {
         ViewBean bean = new ViewBean();
+        bean.networkSettledTime = networkSettledMetric.resolve();
+        bean.interactionToNextViewTime = this.interactionToNextViewTime;
         bean.id = this.id;
         bean.viewReferrer = this.viewReferrer;
         bean.viewName = this.viewName;
@@ -52,6 +72,10 @@ public class ActiveViewBean extends ViewBean {
         bean.loadTime = this.loadTime;
         bean.timeSpent = this.timeSpent;
         bean.sessionId = this.sessionId;
+        bean.sessionStartReason = this.sessionStartReason;
+        bean.appStateStart = this.appStateStart;
+        bean.appStateProcess = this.appStateProcess;
+        bean.closedAppState = this.closedAppState;
         bean.processName = this.processName;
         bean.processRunId = this.processRunId;
         bean.processStartMs = this.processStartMs;

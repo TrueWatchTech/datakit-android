@@ -1,3 +1,17 @@
+# plugin 1.3.9
+1. Added automatic return-value wrapping for `URL.openConnection()` and `URL.openConnection(Proxy)`, preserving each original call and argument evaluation and passing the original Proxy (including `NO_PROXY`) to the Agent hook. Requires `ft-sdk >= 1.7.6`; older Agents are rejected at build time.
+2. Added `FTExt.instrumentHttpURLConnection` (default true) as a Gradle instrumentation cache input. Existing package/class/method exclusions apply, and repeated transforms do not add duplicate hooks.
+3. URLConnection instrumentation observes the original platform connection without taking over redirects or injecting Visitor ID headers.
+
+---
+# plugin 1.3.9-beta01
+1. Same as version 1.3.9-alpha02.
+
+---
+# plugin 1.3.9-alpha02
+1. Pass the original Proxy (including NO_PROXY) to the binary-compatible Agent hook while invoking URL.openConnection exactly once. The Agent observes the original platform connection only; it does not take over redirects or inject URLConnection Visitor ID headers. Repeated transforms and excluded methods remain supported. Requires ft-sdk >= 1.7.6-alpha09.
+
+---
 # plugin 1.3.9-alpha01
 1. Added automatic return-value wrapping for exactly `URL.openConnection()` and `URL.openConnection(Proxy)`, retaining each original call and argument evaluation. Requires `ft-sdk >= 1.7.6-alpha03`; older Agents are rejected at build time.
 2. Added `FTExt.instrumentHttpURLConnection` (default true) as a Gradle instrumentation cache input. Existing package/class/method exclusions apply; repeated transforms do not add duplicate URLConnection hooks.

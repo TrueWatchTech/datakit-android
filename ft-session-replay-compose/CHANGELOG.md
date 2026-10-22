@@ -1,3 +1,23 @@
+# replay-compose 0.1.9
+1. Aligned with Session Replay 0.1.9 for external recorder support, segment compression fixes, percentage sampling configuration and opt-in Heatmap behavior. No module-specific API or behavior changes.
+
+---
+# replay-compose 0.1.9-beta01
+1. Same as version 0.1.9-alpha07.
+
+---
+# replay-compose 0.1.9-alpha07
+1. Aligned with Session Replay 0.1.9-alpha07 for runtime sampling visibility and percentage sampling metadata; no module-specific changes.
+
+---
+# replay-compose 0.1.9-alpha05
+1. Aligned with Session Replay 0.1.9-alpha05 for percentage sampling configuration; no module-specific changes.
+
+---
+# replay-compose 0.1.9-alpha04
+1. Aligned with Session Replay 0.1.9-alpha04 for the opt-in Heatmap setting; no module-specific changes.
+
+---
 # replay 0.1.9-alpha03
 1. Aligned with Session Replay 0.1.9-alpha03 for the segment compression format fix.
 

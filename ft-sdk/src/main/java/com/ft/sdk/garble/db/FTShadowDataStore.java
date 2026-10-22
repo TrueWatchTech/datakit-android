@@ -222,6 +222,17 @@ class FTShadowDataStore implements FTDataStore, HistoricalRumDataStore {
     }
 
     @Override
+    public void updateActionExtraAttr(String actionId, String attr) {
+        primary.updateActionExtraAttr(actionId, attr);
+        mirror(new Runnable() {
+            @Override
+            public void run() {
+                shadow.updateActionExtraAttr(actionId, attr);
+            }
+        });
+    }
+
+    @Override
     public void updateViewExtraAttr(String viewId, String attr) {
         primary.updateViewExtraAttr(viewId, attr);
         mirror(new Runnable() {
@@ -293,18 +304,29 @@ class FTShadowDataStore implements FTDataStore, HistoricalRumDataStore {
     public InsertResult prepareHistoricalRum(@NonNull String dedupeKey,
                                              @NonNull String viewId,
                                              @NonNull SyncData data) {
+        return prepareHistoricalRum(dedupeKey, viewId, data, 0, false);
+    }
+
+    @Override
+    public InsertResult prepareHistoricalRum(@NonNull String dedupeKey,
+                                             @NonNull String viewId,
+                                             @NonNull SyncData data,
+                                             long viewTimeSpentNs,
+                                             boolean closeView) {
         if (!(primary instanceof HistoricalRumDataStore)
                 || !(shadow instanceof HistoricalRumDataStore)) {
             return InsertResult.FAILED;
         }
         InsertResult result = ((HistoricalRumDataStore) primary)
-                .prepareHistoricalRum(dedupeKey, viewId, data);
+                .prepareHistoricalRum(dedupeKey, viewId, data,
+                        viewTimeSpentNs, closeView);
         if (result != InsertResult.FAILED) {
             mirror(new Runnable() {
                 @Override
                 public void run() {
                     ((HistoricalRumDataStore) shadow)
-                            .prepareHistoricalRum(dedupeKey, viewId, data);
+                            .prepareHistoricalRum(dedupeKey, viewId, data,
+                                    viewTimeSpentNs, closeView);
                 }
             });
         }

@@ -1,5 +1,6 @@
 package com.ft.sdk.garble.db;
 
+import com.ft.sdk.diagnostics.internal.DiagnosticsBridge;
 import android.annotation.SuppressLint;
 import android.content.ContentProviderOperation;
 import android.content.ContentProviderResult;
@@ -119,7 +120,9 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
                 .append(" ASC LIMIT ")
                 .append(limit)
                 .append(")");
-        return db.delete(FTSQL.FT_SYNC_DATA_FLAT_TABLE_NAME, where.toString(), null);
+        int deleted=db.delete(FTSQL.FT_SYNC_DATA_FLAT_TABLE_NAME, where.toString(), null);
+        DiagnosticsBridge.record("storage_remove",dataType,deleted,-1,"sqlite_full_cleanup");
+        return deleted;
     }
 
     /**
@@ -213,6 +216,18 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
      * @param actionId
      * @param duration
      */
+    public void updateActionExtraAttr(String actionId, String attr) {
+        if (actionId == null) return;
+        try {
+            ContentValues values = new ContentValues();
+            values.put(FTSQL.RUM_COLUMN_EXTRA_ATTR, attr);
+            contentProvider.update(FTContentProvider.getUriActionData(), values,
+                    FTSQL.RUM_COLUMN_ID + "=?", new String[]{actionId});
+        } catch (Exception e) {
+            LogUtils.e(TAG, LogUtils.getStackTraceString(e));
+        }
+    }
+
     public void closeAction(final String actionId, final long duration, boolean force) {
         LogUtils.d(TAG, "closeAction:" + actionId + ",duration:" + duration);
 
@@ -494,33 +509,12 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
      */
     public void updateViewExtraAttr(String viewId, String attr) {
         if (viewId == null) return;
-
         try {
-            // Use ContentProvider's query method to check if the view exists
-            Uri uri = FTContentProvider.getUriViewData();
-            String selection = FTSQL.RUM_COLUMN_ID + "=?";
-            String[] selectionArgs = {viewId};
-
-            Cursor cursor = contentProvider.query(uri, null, selection, selectionArgs, null);
-            if (cursor != null && cursor.moveToFirst()) {
-                int count = cursor.getInt(0);
-
-                if (count > 0) {
-                    // Use ContentProvider's update method to update the extra attribute
-                    ContentValues contentValues = new ContentValues();
-                    contentValues.put(FTSQL.RUM_COLUMN_EXTRA_ATTR, attr);
-
-                    int updatedRows = contentProvider.update(uri, contentValues, selection, selectionArgs);
-                    if (updatedRows > 0) {
-                        //LogUtils.d(TAG, "updateViewExtraAttr executed successfully via ContentProvider: " + viewId);
-                    } else {
-                        LogUtils.e(TAG, "updateViewExtraAttr executed failed via ContentProvider: " + viewId);
-                    }
-                }
-            }
-            if (cursor != null) {
-                cursor.close();
-            }
+            ContentValues values = new ContentValues();
+            values.put(FTSQL.RUM_COLUMN_EXTRA_ATTR, attr);
+            // Column zero is the textual View ID, not a COUNT(*) result. Update by ID directly.
+            contentProvider.update(FTContentProvider.getUriViewData(), values,
+                    FTSQL.RUM_COLUMN_ID + "=?", new String[]{viewId});
         } catch (Exception e) {
             LogUtils.d(TAG, LogUtils.getStackTraceString(e));
         }
@@ -787,6 +781,8 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
                 // Update existing record
                 int updatedRows = contentProvider.update(uri, contentValues, selection, selectionArgs);
                 if (updatedRows > 0) {
+                    if(DiagnosticsBridge.enabled()) DiagnosticsBridge.record("storage_write",data.getDataType().getValue(),updatedRows,
+                            data.getDataString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length,"sqlite_update");
                     LogUtils.d(TAG, "updateOrInsertSyncData: Updated existing record with UUID: " + data.getUuid());
                     return true;
                 } else {
@@ -806,6 +802,15 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
     public InsertResult prepareHistoricalRum(@NonNull String dedupeKey,
                                              @NonNull String viewId,
                                              @NonNull SyncData data) {
+        return prepareHistoricalRum(dedupeKey, viewId, data, 0, false);
+    }
+
+    @Override
+    public InsertResult prepareHistoricalRum(@NonNull String dedupeKey,
+                                             @NonNull String viewId,
+                                             @NonNull SyncData data,
+                                             long viewTimeSpentNs,
+                                             boolean closeView) {
         if (!HistoricalAnrDataId.canonicalize(dedupeKey, data)) {
             return InsertResult.FAILED;
         }
@@ -821,6 +826,9 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
             extras.putString(FTSQL.RECORD_COLUMN_DATA_TYPE, pendingType);
             extras.putString(FTSQL.RECORD_COLUMN_DEDUPE_KEY, dedupeKey);
             extras.putString(FTSQL.RUM_COLUMN_VIEW_ID, viewId);
+            extras.putLong(FTSQL.RUM_COLUMN_VIEW_TIME_SPENT,
+                    Math.max(0, viewTimeSpentNs));
+            extras.putBoolean(FTSQL.RUM_COLUMN_IS_CLOSE, closeView);
             Bundle result = contentProvider.call(
                     FTContentProvider.getUriSyncDataFlat(),
                     FTContentProvider.METHOD_HISTORICAL_RUM_PERSIST,
@@ -829,6 +837,8 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
             if (result == null || !result.getBoolean("success")) {
                 return InsertResult.FAILED;
             }
+            if(result.getBoolean("inserted") && DiagnosticsBridge.enabled()) DiagnosticsBridge.record("storage_write","rum",1,
+                    data.getDataString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length,"historical_insert");
             return result.getBoolean("inserted")
                     ? InsertResult.INSERTED
                     : InsertResult.ALREADY_EXISTS;
@@ -902,6 +912,12 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
             // Use ContentProvider's bulkInsert for better performance
             Uri uri = FTContentProvider.getUriSyncDataFlat();
             int insertedCount = contentProvider.bulkInsert(uri, contentValuesArray);
+            if (DiagnosticsBridge.enabled()) {
+                if (insertedCount == dataList.size()) {
+                    for (SyncData item : dataList) DiagnosticsBridge.record("storage_write", item.getDataType().getValue(), 1,
+                            item.getDataString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length, reInsert ? "sqlite_reinsert" : "sqlite_insert");
+                } else DiagnosticsBridge.record("storage_write", "other", Math.max(0, insertedCount), -1, "sqlite_partial_or_failed");
+            }
 
             if (insertedCount > 0) {
                 if (insertedCount > 1) {
@@ -1010,6 +1026,7 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
                     + FTSQL.RECORD_COLUMN_TM + "< " + expireTimeline;
 
             count = contentProvider.delete(FTContentProvider.getUriSyncDataFlat(), selection, null);
+            DiagnosticsBridge.record("storage_remove", dataType.getValue(), count, -1, "expired");
             if (count > 0) {
                 LogUtils.d(TAG, "deleteExpireCache executed successfully via ContentProvider, deleted: " + count);
             }
@@ -1042,6 +1059,7 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
                     null);
             if (cursor != null && cursor.moveToFirst()) {
                 count = cursor.getInt(0);
+                DiagnosticsBridge.backlog(list != null && list.length == 1 ? list[0].getValue() : "other", count);
             }
             if (cursor != null) {
                 cursor.close();
@@ -1089,6 +1107,7 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
 
             Bundle result = contentProvider.call(FTContentProvider.getUriSyncDataFlat(), FTContentProvider.METHOD_EXEC_SQL, null, extras);
             if (result.getBoolean("success")) {
+                DiagnosticsBridge.record("storage_remove", list != null && list.length == 1 ? list[0].getValue() : "other", -1, -1, "capacity_cleanup_count_unavailable");
 
                 if (FTDBCachePolicy.get().isLimitWithCacheSize()
                         && FTDBCachePolicy.get().isReachCacheLimit()) {
@@ -1229,6 +1248,7 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
                     }
                 }
 
+                DiagnosticsBridge.record("storage_remove", "other", totalDeleted, -1, "sqlite_delete_by_id");
                 if (totalDeleted > 0) {
                     //LogUtils.d(TAG, "Batch delete completed successfully, deleted " + totalDeleted + " records");
                 } else {

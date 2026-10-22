@@ -22,6 +22,9 @@ import java.util.Iterator;
  * @author Brandon
  */
 public class ViewBean {
+    public Long networkSettledTime;
+    public Long interactionToNextViewTime;
+
     private static final String TAG = Constants.LOG_TAG_PREFIX + "ViewBean";
     /**
      * Unique View ID, {@link Constants#KEY_RUM_VIEW_ID}
@@ -127,6 +130,19 @@ public class ViewBean {
      * {@link FTRUMInnerManager#sessionId},{@link Constants#KEY_RUM_SESSION_ID}
      */
     String sessionId;
+    public long appStateStart;
+    public String appStateProcess;
+    public String closedAppState = "unknown";
+
+    String sessionStartReason = "unknown";
+
+    public String getSessionStartReason() {
+        return sessionStartReason;
+    }
+
+    public void setSessionStartReason(String reason) {
+        sessionStartReason = reason;
+    }
 
     String processName;
 
@@ -430,6 +446,8 @@ public class ViewBean {
      */
     public String getAttrJsonString() {
         HashMap<String, Object> map = new HashMap<>();
+        if (networkSettledTime != null) map.put(Constants.KEY_RUM_VIEW_NETWORK_SETTLED_TIME, networkSettledTime);
+        if (interactionToNextViewTime != null) map.put(Constants.KEY_RUM_VIEW_INTERACTION_TO_NEXT_VIEW_TIME, interactionToNextViewTime);
         map.put(Constants.KEY_RUM_SDK_INNER_KEY_COLLECT_TYPE, collectType);
         map.put(Constants.KEY_RUM_SESSION_ERROR_TIMESTAMP, lastErrorTime);
         map.put(Constants.KEY_BATTERY_CURRENT_AVG, batteryCurrentAvg);
@@ -442,6 +460,10 @@ public class ViewBean {
         map.put(Constants.KEY_MEMORY_MAX, memoryMax);
         map.put(Constants.KEY_HAS_REPLAY, hasReplay);
         map.put(Constants.KEY_RUM_SDK_INNER_KEY_VIEW_LONG_TASK_DURATION, longTaskDuration);
+        map.put("app_state_start", appStateStart);
+        map.put("app_state_process", appStateProcess);
+        map.put("closed_app_state", closedAppState);
+        map.put(Constants.KEY_RUM_SESSION_START_REASON, sessionStartReason);
         map.put(Constants.KEY_RUM_SDK_INNER_KEY_PROPERTY, property);
         map.put(Constants.KEY_RUM_SDK_INNER_KEY_START_TIME_NANO, startTimeNanoForDuration);
         map.put(Constants.KEY_RUM_SDK_INNER_KEY_TAGS, tags);
@@ -456,6 +478,14 @@ public class ViewBean {
     public void setFromAttrJsonString(String jsonString) {
         try {
             JSONObject json = new JSONObject(jsonString);
+            networkSettledTime = !json.isNull(Constants.KEY_RUM_VIEW_NETWORK_SETTLED_TIME)
+                    ? json.getLong(Constants.KEY_RUM_VIEW_NETWORK_SETTLED_TIME) : null;
+            interactionToNextViewTime = !json.isNull(Constants.KEY_RUM_VIEW_INTERACTION_TO_NEXT_VIEW_TIME)
+                    ? json.getLong(Constants.KEY_RUM_VIEW_INTERACTION_TO_NEXT_VIEW_TIME) : null;
+            appStateStart = json.optLong("app_state_start");
+            appStateProcess = json.optString("app_state_process", null);
+            closedAppState = json.optString("closed_app_state", "unknown");
+            sessionStartReason = json.optString(Constants.KEY_RUM_SESSION_START_REASON, "unknown");
             this.lastErrorTime = json.optLong(Constants.KEY_RUM_SESSION_ERROR_TIMESTAMP);
             this.collectType = json.optString(Constants.KEY_RUM_SDK_INNER_KEY_COLLECT_TYPE);
             this.batteryCurrentAvg = json.optInt(Constants.KEY_BATTERY_CURRENT_AVG);

@@ -81,6 +81,7 @@ public class FTSdk {
      * @param ftSDKConfig base SDK configuration
      */
     public static synchronized void install(@NonNull FTSDKConfig ftSDKConfig) {
+        long sdkStartTimeNs = System.nanoTime();
         try {
             if (ftSDKConfig == null) {
                 LogUtils.e(TAG, "Parameter ftSDKConfig cannot be null");
@@ -98,6 +99,8 @@ public class FTSdk {
                         return;
                     }
                 }
+                FTActivityManager.get();
+                FTEarlyCrashTracker.get().initialize(FTApplication.getApplication(), sdkStartTimeNs);
                 mFtSdk = new FTSdk(ftSDKConfig);
                 ftSDKConfig.isMainProcess = Utils.isMainProcess();
                 mFtSdk.initFTConfig(ftSDKConfig);
@@ -132,6 +135,7 @@ public class FTSdk {
      * Shutdown running objects within SDK
      */
     public static void shutDown() {
+        FTVisitorIdManager.get().stop();
         FTURLConnectionResourceReporter.shutdown();
         SyncTaskManager.get().release();
         FTRUMConfigManager.get().release();
@@ -244,6 +248,7 @@ public class FTSdk {
     public static void initRUMWithConfig(@NonNull FTRUMConfig config) {
         try {
             config.setServiceName(get().getBaseConfig().getServiceName());
+            FTVisitorIdManager.get().init(config.getVisitorIdConfig());
             if (get().mRemoteConfigManager != null) {
                 get().mRemoteConfigManager.mergeRUMConfigFromCache(config);
                 if (FTHttpConfigManager.get().isUrlAvailable()) {
@@ -344,6 +349,15 @@ public class FTSdk {
      */
     public static void unbindRumUserData() {
         FTRUMConfigManager.get().unbindUserData();
+    }
+
+    /**
+     * Rotates the anonymous Visitor ID after an application-confirmed sign-out or account switch.
+     * Does not change the RUM user, session, Trace IDs or sampling. A no-op when disabled.
+     * Never call automatically for HTTP 401 or request failures.
+     */
+    public static void resetVisitorId() {
+        FTVisitorIdManager.get().reset();
     }
 
     /**

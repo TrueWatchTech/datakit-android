@@ -1,3 +1,35 @@
+# replay 0.1.9
+1. Added reusable external recorder ownership control and publicly configurable external-only mode for framework/engine integrations. Native recording pauses while external owners are active and resumes with a full snapshot after the final owner releases control. Fixed recorder handoffs so queued records retain their original active RUM View and closed Views reject new records.
+2. Added budgeted WebP encoding for external recorder images, reducing quality and dimensions before rejecting frames that exceed the byte limit.
+3. Fixed Replay segment compression to use a single SYNC_FLUSH-aligned zlib stream, restoring playback when multiple native or external-recorder segments are joined.
+4. Added `FTSessionReplayConfig.setSessionReplaySamplingRate(float)` and `setSessionReplayOnErrorSamplingRate(float)`, matching getters and runtime updates, using 0–100 percentages with fractional and zero values. Deprecated 0–1 APIs retain their behavior. Runtime updates are visible across threads and feature sampling metadata uses percentages. Pair with `ft-sdk >= 1.7.6` to retain remote-over-local priority with the new configuration APIs.
+5. Native Replay follows the Agent's opt-in Heatmap setting, skipping permanent ID resolution and transparent Heatmap binding nodes when disabled while preserving ordinary wireframes and touch visualization. Use `ft-sdk >= 1.7.6` and `FTRUMConfig.setEnableHeatMap(true)` to enable Heatmap; older Agents default to disabled.
+6. Added default-off self-monitoring hooks for serialized event writes, failures, size rejection, file backlog, selected batches, retries and cleanup. Added the `ft-diagnostics-api:0.1.0` runtime dependency; optional `ft-diagnostics:0.1.0` provides local collection. Direct AAR integrations must include the API AAR. Pair with `ft-sdk >= 1.7.6` to also observe SDK HTTP uploads and body bytes. Recording and upload behavior are preserved; observed write bytes describe serialized events rather than physical disk IO.
+
+---
+# replay 0.1.9-beta01
+1. Same as version 0.1.9-alpha07.
+
+---
+# replay 0.1.9-alpha07
+1. Made runtime Replay sampler updates visible across threads so Native RUM sampling metadata can read the effective rates while remote configuration is being updated. Replay feature context sampling fields now use 0–100 percentages; internal samplers and legacy APIs retain 0–1 probabilities.
+
+---
+# replay 0.1.9-alpha06
+1. Added default-off self-monitoring hooks for Replay serialized event writes, write failures and size rejection, observed file backlog, selected batches, retained retries, and file cleanup.
+2. Added the `ft-diagnostics-api:0.1.0-alpha01` runtime dependency. Use the optional `ft-diagnostics:0.1.0-alpha01` collector to inspect local diagnostics; pair with `ft-sdk >= 1.7.6-alpha07` to also observe SDK HTTP upload attempts and body bytes. Direct AAR integrations must also include the API AAR.
+3. Preserved Replay recording and upload behavior. Replay backlog counts files, and write bytes describe serialized event data before batch framing/encryption rather than physical disk IO.
+
+---
+# replay 0.1.9-alpha05
+1. Added `FTSessionReplayConfig.setSessionReplaySamplingRate(float)` (0–100, default 100) and `setSessionReplayOnErrorSamplingRate(float)` (0–100, default 0), matching getters and feature runtime update APIs. Deprecated the old 0–1 APIs while retaining behavior for legacy callers.
+2. Preserved fractional percentages, explicit zero and new-over-old initialization precedence. When using the new config APIs with remote configuration, use `ft-sdk >= 1.7.6-alpha05` so remote values continue to override explicit new local settings.
+
+---
+# replay 0.1.9-alpha04
+1. Native Replay now follows the Agent Heatmap setting and skips permanent ID resolution and transparent Heatmap binding nodes when disabled, preserving ordinary wireframes, viewport dimensions and touch visualization. Requires `ft-sdk >= 1.7.6-alpha04` to opt in through `FTRUMConfig.setEnableHeatMap(true)`; older Agents default to disabled.
+
+---
 # replay 0.1.9-alpha03
 1. Fixed Replay segment compression to use a single SYNC_FLUSH-aligned zlib stream, restoring playback when multiple native or external-recorder segments are joined.
 

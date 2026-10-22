@@ -33,6 +33,7 @@ public class FTResourceEventListener extends EventListener {
 
     private String requestHost = null;
     private long callStartTime = -1;
+    private long callStartEpoch = -1;
     private long headerEndTime = -1;
     private long headerStartTime = -1;
     private long bodyStartTime = -1;
@@ -66,7 +67,8 @@ public class FTResourceEventListener extends EventListener {
         this.enableResourceHostIP = enableResourceHostIP;
         this.resourceId = resourceId;
         this.originEventListener = originEventListener;
-        FTRUMInnerManager.get().onCreateResource(resourceId);
+        // Creating a Call does not start a request. The interceptor registers it
+        // when OkHttp dispatches it, including after any Dispatcher queue delay.
     }
 
     @Override
@@ -88,6 +90,7 @@ public class FTResourceEventListener extends EventListener {
         originEventListener.callStart(call);
         requestHost = call.request().url().host();
         callStartTime = System.nanoTime();
+        callStartEpoch = com.ft.sdk.garble.utils.Utils.getCurrentNanoTime();
     }
 
     @Override
@@ -254,6 +257,7 @@ public class FTResourceEventListener extends EventListener {
         NetStatusBean netStatusBean = new NetStatusBean();
         netStatusBean.requestHost = requestHost;
         netStatusBean.callStartTime = callStartTime;
+        netStatusBean.callStartEpoch = callStartEpoch;
         netStatusBean.headerEndTime = headerEndTime;
         netStatusBean.headerStartTime = headerStartTime;
         netStatusBean.bodyEndTime = bodyEndTime;
@@ -268,7 +272,8 @@ public class FTResourceEventListener extends EventListener {
         netStatusBean.connectionReuse = resourceConnectionReuse;
         netStatusBean.requestBodySize = requestBodySize;
         netStatusBean.responseBodySize = responseBodySize;
-        FTRUMInnerManager.get().setNetState(this.resourceId, netStatusBean);
+        FTRUMInnerManager.get().setOkHttpResourceNetState(this.resourceId, netStatusBean,
+                System.nanoTime());
     }
 
     /**

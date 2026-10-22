@@ -14,12 +14,14 @@ public class FTRUMConfig {
     /**
      * Sampling rate, [0,1], scope is all View, Action, LongTask, Error data under the same session_id
      */
-    private float samplingRate = 1;
+    private volatile float samplingRate = 1;
+    private boolean percentageSamplingRateSet;
 
     /**
      * Error sampling rate, [0,1], scope is all View, Action, LongTask, Error data under the same session_id
      */
-    private float sessionErrorSampleRate = 0;
+    private volatile float sessionErrorSampleRate = 0;
+    private boolean percentageErrorSamplingRateSet;
 
     /**
      * RUM appID
@@ -48,10 +50,16 @@ public class FTRUMConfig {
      */
     @Nullable
     private FTIssueDataProvider issueDataProvider;
+    @NonNull
+    private FTInitialResourceIdentifier initialResourceIdentifier = new FTTimeBasedInitialResourceIdentifier();
+    @Nullable
+    private FTLastInteractionIdentifier lastInteractionIdentifier = new FTTimeBasedInteractionIdentifier();
     /**
      * Whether to enable user action tracking
      */
     private boolean enableTraceUserAction;
+    /** Whether to collect experimental Heatmap data. Disabled by default. */
+    private boolean enableHeatMap;
     /**
      * Whether to enable user view tracking
      */
@@ -191,7 +199,9 @@ public class FTRUMConfig {
      * Get sampling rate
      *
      * @return Sampling rate, float, 0~1
+     * @deprecated Use {@link #getSessionSamplingRate()} with a percentage.
      */
+    @Deprecated
     public float getSamplingRate() {
         return samplingRate;
     }
@@ -202,17 +212,54 @@ public class FTRUMConfig {
      *
      * @param samplingRate RUM session sampling rate in the range [0, 1]
      * @return this config for chaining
+     * @deprecated Use {@link #setSessionSamplingRate(float)} with a percentage.
      */
+    @Deprecated
     public FTRUMConfig setSamplingRate(float samplingRate) {
-        this.samplingRate = samplingRate;
+        if (!percentageSamplingRateSet) {
+            this.samplingRate = samplingRate;
+        }
         return this;
+    }
+
+    /**
+     * Returns the effective sessionSamplingRate percentage in [0, 100]. Default: 100.
+     */
+    public float getSessionSamplingRate() {
+        return samplingRate * 100f;
+    }
+
+    /**
+     * Sets sessionSamplingRate as a percentage. For example, 0.1f means 0.1%.
+     * Takes precedence over the deprecated setSamplingRate, regardless of call order.
+     * Remote configuration continues to override local configuration.
+     *
+     * @param sessionSamplingRate finite percentage in [0, 100]
+     * @return this config for chaining
+     * @throws IllegalArgumentException for a non-finite or out-of-range value
+     */
+    public FTRUMConfig setSessionSamplingRate(float sessionSamplingRate) {
+        if (Float.isNaN(sessionSamplingRate) || Float.isInfinite(sessionSamplingRate)
+                || sessionSamplingRate < 0f || sessionSamplingRate > 100f) {
+            throw new IllegalArgumentException("sessionSamplingRate must be a finite number in [0, 100]");
+        }
+        this.samplingRate = sessionSamplingRate / 100f;
+        this.percentageSamplingRateSet = true;
+        return this;
+    }
+
+    // Remote values have already been normalized to the legacy probability scale.
+    void setRemoteSamplingRate(float samplingRate) {
+        this.samplingRate = samplingRate;
     }
 
     /**
      * Get error sampling rate
      *
      * @return RUM error-session sampling rate in the range [0, 1]
+     * @deprecated Use getSessionOnErrorSamplingRate(), in percent.
      */
+    @Deprecated
     public float getSessionErrorSampleRate() {
         return sessionErrorSampleRate;
     }
@@ -224,11 +271,33 @@ public class FTRUMConfig {
      * Scope is all View, Action, LongTask, Error under the same session_id
      *
      * @param sessionErrorSampleRate error-session sampling rate in the range [0, 1]
+     * @deprecated Use setSessionOnErrorSamplingRate(float), in percent.
      */
+    @Deprecated
     public FTRUMConfig setSessionErrorSampleRate(float sessionErrorSampleRate) {
-        this.sessionErrorSampleRate = sessionErrorSampleRate;
+        if (!percentageErrorSamplingRateSet) this.sessionErrorSampleRate = sessionErrorSampleRate;
         return this;
     }
+
+    /** Returns the effective error-session percentage; default 0. */
+    public float getSessionOnErrorSamplingRate() { return sessionErrorSampleRate * 100f; }
+
+    /**
+     * Sets error-session sampling in [0,100], including fractions; default 0.
+     * An explicit new value wins over the legacy setter regardless of call order.
+     * @throws IllegalArgumentException for a non-finite or out-of-range value
+     */
+    public FTRUMConfig setSessionOnErrorSamplingRate(float percentage) {
+        if (Float.isNaN(percentage) || Float.isInfinite(percentage) || percentage < 0f || percentage > 100f) {
+            throw new IllegalArgumentException("sessionOnErrorSamplingRate must be finite and within [0,100]");
+        }
+        sessionErrorSampleRate = percentage / 100f;
+        percentageErrorSamplingRateSet = true;
+        return this;
+    }
+
+    // Remote values already use the internal probability scale and retain source priority.
+    void setRemoteSessionErrorSampleRate(float probability) { sessionErrorSampleRate = probability; }
 
     /**
      * Set serviceName
@@ -445,10 +514,97 @@ public class FTRUMConfig {
     }
 
     /**
+     * Replaces the initial Resource rule for native View network settled time. The default selects
+     * Resources starting strictly before 100 ms from View start. Return false to exclude a Resource
+     * from this metric without dropping its event. This strategy is snapshotted at RUM initialization;
+     * changing this config afterwards does not change the running SDK. See {@link FTInitialResourceIdentifier}
+     * for callback timing and threading requirements.
+     *
+     * <p>Java example (500 millisecond window):</p>
+     * <pre>{@code
+     * new FTRUMConfig().setInitialResourceIdentifier(
+     *         new FTTimeBasedInitialResourceIdentifier(500));
+     * }</pre>
+     * <p>Kotlin example (business-controlled selection at registration time):</p>
+     * <pre>{@code
+     * FTRUMConfig().setInitialResourceIdentifier { context ->
+     *     initialLoading.get() // for example, a thread-safe AtomicBoolean maintained by the app
+     * }
+     * }</pre>
+     *
+     * @param identifier non-null rule; use a rule returning false to disable this metric
+     * @return this config for chaining
+     */
+    public FTRUMConfig setInitialResourceIdentifier(@NonNull FTInitialResourceIdentifier identifier) {
+        if (identifier == null) throw new NullPointerException("identifier");
+        initialResourceIdentifier = identifier;
+        return this;
+    }
+
+    @NonNull
+    FTInitialResourceIdentifier getInitialResourceIdentifier() {
+        return initialResourceIdentifier;
+    }
+
+    /**
+     * Replaces the last-interaction rule for native View interaction-to-next-View time. The default
+     * requires a positive interval strictly below 3000 ms. Only click Actions are candidates,
+     * including automatically collected back-key events (type click, name back).
+     * Rejection does not search earlier interactions. This strategy is snapshotted
+     * at RUM initialization. See {@link FTLastInteractionIdentifier} for callback requirements.
+     *
+     * <p>Java example (only clicks, strictly below 5 seconds):</p>
+     * <pre>{@code
+     * FTLastInteractionIdentifier window = new FTTimeBasedInteractionIdentifier(5000);
+     * new FTRUMConfig().setLastInteractionIdentifier(context ->
+     *         "click".equals(context.getActionType()) && window.validate(context));
+     * }</pre>
+     * <p>Kotlin example:</p>
+     * <pre>{@code
+     * val window = FTTimeBasedInteractionIdentifier(5000)
+     * FTRUMConfig().setLastInteractionIdentifier { context ->
+     *     context.actionType == "click" && window.validate(context)
+     * }
+     * }</pre>
+     *
+     * @param identifier rule to use, or null to disable automatic INV calculation
+     * @return this config for chaining
+     */
+    public FTRUMConfig setLastInteractionIdentifier(@Nullable FTLastInteractionIdentifier identifier) {
+        lastInteractionIdentifier = identifier;
+        return this;
+    }
+
+    @Nullable
+    FTLastInteractionIdentifier getLastInteractionIdentifier() {
+        return lastInteractionIdentifier;
+    }
+
+    /**
      * Returns whether automatic user action tracking is enabled.
      */
     public boolean isEnableTraceUserAction() {
         return enableTraceUserAction;
+    }
+
+    /** Returns whether experimental Heatmap collection is requested. */
+    public boolean isEnableHeatMap() {
+        return enableHeatMap;
+    }
+
+    /**
+     * Enables experimental Heatmap collection for RUM and native Session Replay. Default is false.
+     * Configure before {@link FTSdk#initRUMWithConfig(FTRUMConfig)}; runtime switching is not supported.
+     * Disabling skips Heatmap target lookup, resource-name/path resolution and replay bindings,
+     * while ordinary RUM and Session Replay recording remain available. Enabling does not enable
+     * automatic Action tracking or change Session Replay sampling.
+     *
+     * @param enableHeatMap true to collect Heatmap data
+     * @return this config for chaining
+     */
+    public FTRUMConfig setEnableHeatMap(boolean enableHeatMap) {
+        this.enableHeatMap = enableHeatMap;
+        return this;
     }
 
     /**
@@ -603,6 +759,23 @@ public class FTRUMConfig {
         return !Utils.isNullOrEmpty(rumAppId);
     }
 
+    private FTVisitorIdConfig visitorIdConfig;
+
+    /**
+     * Setting a non-null configuration enables visitor headers; null (the default) disables them.
+     * Independent of RUM/Trace sampling and Resource collection.
+     * Configuration is captured during initRUMWithConfig; subsequent mutations do not apply.
+     */
+    public FTRUMConfig setVisitorIdConfig(FTVisitorIdConfig config) {
+        visitorIdConfig = config;
+        return this;
+    }
+
+    /** Returns the initialization-only Visitor ID configuration, or null when not configured. */
+    public FTVisitorIdConfig getVisitorIdConfig() {
+        return visitorIdConfig;
+    }
+
     /***
      * Add global parameters in RUM
      * @param key attribute key
@@ -623,23 +796,129 @@ public class FTRUMConfig {
 
 
     /**
-     * Support or parameter battery | cpu | memory
+     * Selects device metrics for RUM views without manually building a bit mask.
+     * Configure this before passing the config to {@link FTSdk#initRUMWithConfig(FTRUMConfig)}.
+     * <pre>{@code
+     * config.setDeviceMetricsMonitorTypes(
+     *         DeviceMetricsMonitorType.CPU,
+     *         DeviceMetricsMonitorType.MEMORY,
+     *         DeviceMetricsMonitorType.FPS);
+     *
+     * // All metrics
+     * config.setDeviceMetricsMonitorTypes(DeviceMetricsMonitorType.ALL);
+     *
+     * // Disable device metrics
+     * config.setDeviceMetricsMonitorTypes();
+     * }</pre>
+     * Each call replaces the previous selection. Duplicate types have no additional effect.
+     * The configured collection interval is preserved, initially
+     * {@link DetectFrequency#DEFAULT} (500 ms). See
+     * {@link #setDeviceMetricsMonitorTypes(DetectFrequency, DeviceMetricsMonitorType...)}
+     * to configure the interval.
+     *
+     * @param types non-null metric types; an empty argument list disables device metrics
+     * @return this config for chaining
+     * @throws IllegalArgumentException if the array or any element is null;
+     *                                  the previous configuration is preserved
+     */
+    public FTRUMConfig setDeviceMetricsMonitorTypes(@NonNull DeviceMetricsMonitorType... types) {
+        return setDeviceMetricsMonitorType(toDeviceMetricsMonitorMask(types));
+    }
+
+    /**
+     * Selects device metrics and their collection interval for RUM views.
+     * Configure this before passing the config to {@link FTSdk#initRUMWithConfig(FTRUMConfig)}.
+     * <pre>{@code
+     * config.setDeviceMetricsMonitorTypes(
+     *         DetectFrequency.RARE,
+     *         DeviceMetricsMonitorType.CPU,
+     *         DeviceMetricsMonitorType.MEMORY);
+     * }</pre>
+     * Each call replaces both the previous selection and collection interval.
+     * Duplicate types have no additional effect; {@link DeviceMetricsMonitorType#ALL}
+     * selects all metrics. No metric arguments disable device metrics while updating the interval.
      * <p>
-     * setDeviceMetricsMonitorType(DeviceMetricsMonitorType.ALL.getValue())
+     * Prefer {@link DetectFrequency#DEFAULT} (500 ms) for normal use.
+     * {@link DetectFrequency#RARE} (1000 ms) reduces sampling frequency but may miss
+     * short-lived changes. Reserve {@link DetectFrequency#FREQUENT} (100 ms) for
+     * short-term diagnostics after evaluating collection overhead.
+     *
+     * @param frequency non-null metric collection frequency
+     * @param types non-null metric types; an empty argument list disables device metrics
+     * @return this config for chaining
+     * @throws IllegalArgumentException if the frequency, array, or any element is null;
+     *                                  the previous configuration is preserved
+     */
+    public FTRUMConfig setDeviceMetricsMonitorTypes(@NonNull DetectFrequency frequency,
+                                                  @NonNull DeviceMetricsMonitorType... types) {
+        if (frequency == null) {
+            throw new IllegalArgumentException("Device metric collection frequency must not be null");
+        }
+        return setDeviceMetricsMonitorType(toDeviceMetricsMonitorMask(types), frequency);
+    }
+
+    private static int toDeviceMetricsMonitorMask(DeviceMetricsMonitorType... types) {
+        if (types == null) {
+            throw new IllegalArgumentException("Device metric types must not be null");
+        }
+        int mask = DeviceMetricsMonitorType.NO_SET;
+        for (DeviceMetricsMonitorType type : types) {
+            if (type == null) {
+                throw new IllegalArgumentException("Device metric type must not be null");
+            }
+            mask |= type.getValue();
+        }
+        return mask;
+    }
+
+    /**
+     * Sets the device metrics collected for RUM views. Monitoring is disabled by default.
+     * For enum-based selection, prefer {@link #setDeviceMetricsMonitorTypes(DeviceMetricsMonitorType...)}.
+     * Configure this before passing the config to {@link FTSdk#initRUMWithConfig(FTRUMConfig)}.
+     * <p>
+     * Select only the metrics your application needs. For general view monitoring, consider
+     * CPU, memory, and FPS; add battery monitoring when needed (unsupported on TV devices).
+     * Use {@link DeviceMetricsMonitorType#getValue()} for each type and combine values with
+     * the bitwise OR operator ({@code |}):
+     * <pre>{@code
+     * // Single metric
+     * config.setDeviceMetricsMonitorType(DeviceMetricsMonitorType.CPU.getValue());
+     *
+     * // Multiple metrics
+     * config.setDeviceMetricsMonitorType(
+     *         DeviceMetricsMonitorType.CPU.getValue()
+     *                 | DeviceMetricsMonitorType.MEMORY.getValue()
+     *                 | DeviceMetricsMonitorType.FPS.getValue());
+     *
+     * // All metrics
+     * config.setDeviceMetricsMonitorType(DeviceMetricsMonitorType.ALL.getValue());
+     *
+     * // Disable device metrics
+     * config.setDeviceMetricsMonitorType(DeviceMetricsMonitorType.NO_SET);
+     * }</pre>
+     * Each call replaces the previous selection; repeated calls do not add metrics.
+     * This overload preserves the configured collection interval, initially
+     * {@link DetectFrequency#DEFAULT} (500 ms). Use
+     * {@link #setDeviceMetricsMonitorType(int, DetectFrequency)} to change the interval.
      *
      * @param deviceMetricsMonitorType bit mask built from {@link DeviceMetricsMonitorType}
      * @return this config for chaining
+     * @deprecated Use {@link #setDeviceMetricsMonitorTypes(DeviceMetricsMonitorType...)}
+     * and pass enum values directly instead of combining their integer values.
      */
+    @Deprecated
     public FTRUMConfig setDeviceMetricsMonitorType(int deviceMetricsMonitorType) {
         this.deviceMetricsMonitorType = deviceMetricsMonitorType;
         return this;
     }
 
     /**
-     * Use {@link #setDeviceMetricsMonitorType(int)} instead
+     * Use {@link #setDeviceMetricsMonitorTypes(DeviceMetricsMonitorType...)} instead.
      *
      * @param deviceMetricsMonitorType device metric type to collect
      * @return this config for chaining
+     * @deprecated Use {@link #setDeviceMetricsMonitorTypes(DeviceMetricsMonitorType...)}
+     * and pass enum values directly.
      */
     @Deprecated
     public FTRUMConfig setDeviceMetricsMonitorType(DeviceMetricsMonitorType deviceMetricsMonitorType) {
@@ -649,11 +928,29 @@ public class FTRUMConfig {
 
     /**
      * Sets the device metric types and collection frequency for RUM view monitoring.
+     * For enum-based selection, prefer
+     * {@link #setDeviceMetricsMonitorTypes(DetectFrequency, DeviceMetricsMonitorType...)}.
+     * See {@link #setDeviceMetricsMonitorType(int)} for metric selection examples.
+     * Each call replaces both the previous selection and collection interval.
+     * <p>
+     * Prefer {@link DetectFrequency#DEFAULT} (500 ms) for normal use.
+     * {@link DetectFrequency#RARE} (1000 ms) reduces sampling frequency but may miss
+     * short-lived changes. Reserve {@link DetectFrequency#FREQUENT} (100 ms) for
+     * short-term diagnostics after evaluating collection overhead.
+     * <pre>{@code
+     * config.setDeviceMetricsMonitorType(
+     *         DeviceMetricsMonitorType.CPU.getValue()
+     *                 | DeviceMetricsMonitorType.MEMORY.getValue(),
+     *         DetectFrequency.RARE);
+     * }</pre>
      *
      * @param deviceMetricsMonitorType bit mask built from {@link DeviceMetricsMonitorType}
-     * @param frequency                metric collection frequency
+     * @param frequency                non-null metric collection frequency
      * @return this config for chaining
+     * @deprecated Use {@link #setDeviceMetricsMonitorTypes(DetectFrequency, DeviceMetricsMonitorType...)}
+     * with the frequency first, followed by enum values.
      */
+    @Deprecated
     public FTRUMConfig setDeviceMetricsMonitorType(int deviceMetricsMonitorType, DetectFrequency frequency) {
         this.deviceMetricsMonitorType = deviceMetricsMonitorType;
         this.deviceMetricsDetectFrequency = frequency;
@@ -661,11 +958,13 @@ public class FTRUMConfig {
     }
 
     /**
-     * Use {@link #setDeviceMetricsMonitorType(int, DetectFrequency)} instead
+     * Use {@link #setDeviceMetricsMonitorTypes(DetectFrequency, DeviceMetricsMonitorType...)} instead.
      *
      * @param deviceMetricsMonitorType device metric type to collect
-     * @param frequency                metric collection frequency
+     * @param frequency                non-null metric collection frequency
      * @return this config for chaining
+     * @deprecated Use {@link #setDeviceMetricsMonitorTypes(DetectFrequency, DeviceMetricsMonitorType...)}
+     * with the frequency first, followed by enum values.
      */
     @Deprecated
     public FTRUMConfig setDeviceMetricsMonitorType(DeviceMetricsMonitorType deviceMetricsMonitorType, DetectFrequency frequency) {
@@ -916,6 +1215,7 @@ public class FTRUMConfig {
                 ", blockDurationMS=" + blockDurationMS +
                 ", enableTrackAppANR=" + enableTrackAppANR +
                 ", enableTraceUserAction=" + enableTraceUserAction +
+                ", enableHeatMap=" + enableHeatMap +
                 ", enableTraceUserView=" + enableTraceUserView +
                 ", enableTraceUserResource=" + enableTraceUserResource +
                 ", enableResourceHostIP=" + enableResourceHostIP +
