@@ -14,6 +14,7 @@ import org.robolectric.util.ReflectionHelpers;
 
 import java.io.File;
 import java.io.FileDescriptor;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -24,6 +25,7 @@ import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(RobolectricTestRunner.class)
@@ -64,6 +66,35 @@ public class ProcSamplingTest {
             reader.close();
         }
         FixtureProcFiles.readers.clear();
+    }
+
+    @Test public void topSampleClosesOutputWhenPidMatches() throws IOException {
+        write("top", "PID %CPU\n" + android.os.Process.myPid() + " 25%\n");
+        try (FileInputStream output = new FileInputStream(new File(folder.getRoot(), "top"))) {
+            float usage = CpuUtils.get().readTopCpuUsage(output);
+            assertEquals(25f / Runtime.getRuntime().availableProcessors(), usage, 0f);
+            assertFalse(output.getFD().valid());
+        }
+    }
+
+    @Test public void topSampleClosesOutputAtEndOfFile() throws IOException {
+        write("top", "PID %CPU\n");
+        try (FileInputStream output = new FileInputStream(new File(folder.getRoot(), "top"))) {
+            assertEquals(0f, CpuUtils.get().readTopCpuUsage(output), 0f);
+            assertFalse(output.getFD().valid());
+        }
+    }
+
+    @Test public void topSampleClosesOutputWhenReadFails() throws IOException {
+        File file = folder.newFile("top");
+        try (FileInputStream output = new FileInputStream(file) {
+            @Override public int read(byte[] buffer, int offset, int length) throws IOException {
+                throw new IOException("Read failed");
+            }
+        }) {
+            assertThrows(IOException.class, () -> CpuUtils.get().readTopCpuUsage(output));
+            assertFalse(output.getFD().valid());
+        }
     }
 
     @Test public void missingProcessStatClosesSystemStatOnEachAttempt() throws IOException {
@@ -118,6 +149,18 @@ public class ProcSamplingTest {
         write("status", "VmRSS:  123 kB\n");
         assertEquals(123000, device.getAppMemoryUseSize());
         assertTrue("status must close after finding VmRSS", closedAfterSuccess);
+        assertAllClosed();
+    }
+
+    @Test public void getStartTimeClosesStatAfterSuccessAndParseFailure() throws IOException {
+        DeviceUtils device = DeviceUtils.get();
+        write("stat", "123 (test) R 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19\n");
+        assertEquals(17L, device.getStartTime());
+        assertAllClosed();
+
+        write("stat", "incomplete\n");
+        assertEquals(-1L, device.getStartTime());
+        assertEquals(2, FixtureProcFiles.readers.size());
         assertAllClosed();
     }
 

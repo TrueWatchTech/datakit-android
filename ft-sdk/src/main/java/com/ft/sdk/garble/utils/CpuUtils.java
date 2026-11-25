@@ -5,6 +5,7 @@ import android.text.TextUtils;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.RandomAccessFile;
 
@@ -48,7 +49,19 @@ public class CpuUtils {
         java.lang.Process process = null;
         try {
             process = Runtime.getRuntime().exec("top -n 1");
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            return readTopCpuUsage(process.getInputStream());
+        } catch (IOException e) {
+            LogUtils.e(TAG, LogUtils.getStackTraceString(e));
+            return 0;
+        } finally {
+            if (process != null) {
+                process.destroy();
+            }
+        }
+    }
+
+    float readTopCpuUsage(InputStream output) throws IOException {
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(output))) {
             String line;
             int cpuIndex = -1;
             while ((line = reader.readLine()) != null) {
@@ -75,13 +88,6 @@ public class CpuUtils {
                     }
                     return Float.parseFloat(cpu) / Runtime.getRuntime().availableProcessors();
                 }
-            }
-        } catch (IOException e) {
-            LogUtils.e(TAG, LogUtils.getStackTraceString(e));
-
-        } finally {
-            if (process != null) {
-                process.destroy();
             }
         }
         return 0;

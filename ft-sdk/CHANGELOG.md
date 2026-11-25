@@ -1,3 +1,9 @@
+# agent 1.7.7-beta02
+
+1. On Android 8.0 and later, CPU usage sampling now closes the output stream from `top` after each sample, including when reading fails.
+2. `DeviceUtils.getStartTime()` now closes the process stat file after each read, including when parsing fails.
+
+---
 # agent 1.7.7-beta01
 
 1. Launch Actions, RUM foreground/background state and automatic LongTask and watchdog ANR filters now use the current process's lifecycle. A visible Activity in another process no longer keeps this process in the foreground. Removed the cross-process visibility broadcast and its manifest permission.

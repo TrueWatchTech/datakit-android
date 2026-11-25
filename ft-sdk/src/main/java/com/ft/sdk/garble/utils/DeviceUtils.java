@@ -214,16 +214,12 @@ public class DeviceUtils {
      */
     public long getStartTime() {
         long appTime = -1;
-        try {
-            RandomAccessFile appStatFile = new RandomAccessFile("/proc/"
-                    + android.os.Process.myPid() + "/stat", "r");
+        try (RandomAccessFile appStatFile = ProcFiles.openProcessFile("stat")) {
             String appStatString = appStatFile.readLine();
             String[] appStats = appStatString.split(" ");
             appTime = Long.parseLong(appStats[19]);
-
         } catch (Exception e) {
             LogUtils.e(TAG, LogUtils.getStackTraceString(e));
-
         }
         return appTime;
     }
