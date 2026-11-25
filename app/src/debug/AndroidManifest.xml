@@ -7,14 +7,15 @@
 
     <application>
         <activity
+            android:name=".LaunchChannelActivity"
+            android:exported="false"
+            android:process=":launch_channel"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+        <activity
             android:name=".DebugMainActivity"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:theme="@style/LaunchTestHomeTheme"
+            android:launchMode="singleTask"
+            android:exported="true" />
 
         <activity
             android:name=".HistoricalAnrAcceptanceActivity"

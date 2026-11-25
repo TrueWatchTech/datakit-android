@@ -3,6 +3,7 @@ package com.ft.sdk;
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.Application;
+import android.os.Build;
 import android.view.View;
 
 import com.ft.sdk.garble.utils.Constants;
@@ -13,6 +14,7 @@ import com.ft.sdk.garble.utils.Utils;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -21,22 +23,23 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <a href="https://docs.truewatch.com/real-user-monitoring/explorer/">Explorer</a>
  * <p>
  * {@link Constants#MEASUREMENT} is {@link Constants#FT_MEASUREMENT_RUM_ACTION}
- * {@link Constants#KEY_RUM_ACTION_TYPE} is {@link  Constants#ACTION_NAME_LAUNCH_COLD,
- * Constants#ACTION_TYPE_LAUNCH_HOT}
+ * {@link Constants#KEY_RUM_ACTION_TYPE} identifies cold, warm or hot launch Actions.
  * <p>
  * For the concept of lifecycle, refer to the official documentation
  * <a href="https://developer.android.com/topic/performance/vitals/launch-time?hl=zh-cn">Launch Time</a>
  *
  * <p>
  * Cold start, corresponds to {@link Constants#ACTION_NAME_LAUNCH_COLD}
- * Warm start, hot start, corresponds to {@link Constants#ACTION_TYPE_LAUNCH_HOT}
+ * Warm start corresponds to {@link Constants#ACTION_TYPE_LAUNCH_WARM}; an existing
+ * Activity returning from background corresponds to {@link Constants#ACTION_TYPE_LAUNCH_HOT}.
  *
  * @author Brandon
  */
 class FTAppStartCounter {
     private static final String TAG = Constants.LOG_TAG_PREFIX + "AppStartCounter";
+    static final long FIRST_ACTIVITY_GAP_NS = TimeUnit.SECONDS.toNanos(10);
     /**
-     * Startup duration, unit: nanoseconds
+     * Pending first-launch duration (cold or warm), unit: nanoseconds.
      */
     private long coldStartDuration = 0;
 
@@ -44,6 +47,7 @@ class FTAppStartCounter {
      * Flag indicating whether the first frame has been drawn
      */
     private final AtomicBoolean firstDrawDone = new AtomicBoolean(false);
+    final FTAppStateMonitor appStateMonitor = FTAppStateMonitor.get();
 
     /** Pending candidates, confined to the main thread and released on pause/destroy or completion. */
     private final Map<Activity, FirstDrawDoneListener> firstDrawListeners = new IdentityHashMap<>();
@@ -52,6 +56,9 @@ class FTAppStartCounter {
      * Startup start timestamp for duration, unit: nanoseconds
      */
     private long coldStartTimeLineForNanoDuration = 0;
+    private long processStartTimeline;
+    private long firstActivityObservedTimeline;
+    private boolean firstLaunchWarm;
 
     /**
      * Cold start timeline timestamp used for reporting, unit: nanoseconds
@@ -92,6 +99,8 @@ class FTAppStartCounter {
      * Whether the process was started while the app was not in foreground.
      */
     private boolean launchFromBackground = false;
+    private boolean legacyActivityObserved;
+    private long legacyStartTime;
 
     private boolean foregroundDuringLaunch = false;
 
@@ -99,6 +108,7 @@ class FTAppStartCounter {
 
 
     private FTAppStartCounter() {
+        appStateMonitor.setLaunchCounter(this);
     }
 
     private static class SingletonHolder {
@@ -118,16 +128,27 @@ class FTAppStartCounter {
      */
     void coldStart(long coldStartEndTimeLine) {
         firstDrawDone.set(true);
-        this.coldStartTimeLineForNanoDuration = Utils.getAppStartTimeNs();
+        if (processStartTimeline == 0) {
+            processStartTimeline = readProcessStartTimeline();
+        }
+        firstLaunchWarm = firstActivityObservedTimeline > 0
+                && firstActivityObservedTimeline - processStartTimeline > FIRST_ACTIVITY_GAP_NS;
+        this.coldStartTimeLineForNanoDuration = firstLaunchWarm
+                ? firstActivityObservedTimeline : processStartTimeline;
         this.coldStartDuration = coldStartEndTimeLine - coldStartTimeLineForNanoDuration;
         this.coldStartTimeLine = Utils.getCurrentNanoTime() - coldStartDuration;
 
-        this.applicationPreOnCreateDuration = applicationOnCreateTimeLine - coldStartTimeLineForNanoDuration;
-        this.applicationOnCreateDuration = firstActivityPreOnActivityTimeline - applicationOnCreateTimeLine;
-        this.firsDrawnDuration = coldStartEndTimeLine - firstActivityPreOnActivityTimeline;
+        this.applicationPreOnCreateDuration = !firstLaunchWarm && Build.VERSION.SDK_INT >= 24
+                ? applicationOnCreateTimeLine - coldStartTimeLineForNanoDuration : 0;
+        this.applicationOnCreateDuration = !firstLaunchWarm && firstActivityPreOnActivityTimeline > 0
+                ? firstActivityPreOnActivityTimeline - applicationOnCreateTimeLine : 0;
+        this.firsDrawnDuration = !firstLaunchWarm && firstActivityPreOnActivityTimeline > 0
+                ? coldStartEndTimeLine - firstActivityPreOnActivityTimeline : 0;
 
-        LogUtils.d(TAG, "coldStart:" + coldStartDuration
+        LogUtils.d(TAG, (firstLaunchWarm ? "warmStart:" : "coldStart:") + coldStartDuration
                 + ",coldTimeLine:" + coldStartTimeLineForNanoDuration
+                + ",firstActivityGap:" + (firstActivityObservedTimeline > 0
+                        ? firstActivityObservedTimeline - processStartTimeline : -1)
                 + ",launchFromBackground:" + launchFromBackground
                 + ",appLaunchType:" + getColdStartLaunchType());
     }
@@ -136,6 +157,8 @@ class FTAppStartCounter {
         if (!firstDrawDone.get() && firstActivityPreOnActivityTimeline == 0) {
             LogUtils.d(TAG, "checkFirstActivityPreCreate:" + nanoTimeLine);
             firstActivityPreOnActivityTimeline = nanoTimeLine;
+            if (firstActivityObservedTimeline == 0) firstActivityObservedTimeline = nanoTimeLine;
+            appStateMonitor.onFirstActivityObserved();
         }
 
     }
@@ -170,10 +193,20 @@ class FTAppStartCounter {
     }
 
     /**
-     * Upload cold start time
+     * Upload the pending first launch, retaining its cold/warm classification.
      */
     void coldStartUpload() {
-        if (coldStartDuration <= 0 || coldStartTimeLineForNanoDuration <= 0) return;
+        if (coldStartDuration == 0) return;
+        if (!isValidLaunchDuration(coldStartDuration) || coldStartTimeLineForNanoDuration <= 0) {
+            coldStartDuration = 0;
+            return;
+        }
+        if (firstLaunchWarm) {
+            long duration = coldStartDuration;
+            coldStartDuration = 0;
+            FTAutoTrack.putRUMWarmLaunchPerformance(duration, coldStartTimeLine);
+            return;
+        }
 
         HashMap<String, Long> preApplicationInit = null;
         HashMap<String, Long> applicationInit = null;
@@ -202,12 +235,13 @@ class FTAppStartCounter {
             firstFrameInit.put("duration", firsDrawnDuration);
         }
 
-        FTAutoTrack.putRUMLaunchPerformance(true, coldStartDuration, coldStartTimeLine,
+        long duration = coldStartDuration;
+        coldStartDuration = 0;
+        FTAutoTrack.putRUMLaunchPerformance(true, duration, coldStartTimeLine,
                 preApplicationInit,
                 applicationInit,
                 firstFrameInit,
                 getColdStartLaunchType());
-        coldStartDuration = 0;
     }
 
     /**
@@ -218,8 +252,30 @@ class FTAppStartCounter {
      * @param hotStartDuration Hot start duration, unit: nanoseconds
      */
     void hotStart(long hotStartDuration, long startTime) {
+        if (!isValidLaunchDuration(hotStartDuration)) return;
         FTAutoTrack.putRUMLaunchPerformance(false, hotStartDuration, startTime);
         LogUtils.d(TAG, "hotStart:" + hotStartDuration);
+    }
+
+    void warmStart(long duration, long startTime) {
+        if (!isValidLaunchDuration(duration)) return;
+        FTAutoTrack.putRUMWarmLaunchPerformance(duration, startTime);
+        LogUtils.d(TAG, "warmStart:" + duration);
+    }
+
+    boolean hasCompletedFirstDraw() {
+        return firstDrawDone.get();
+    }
+
+    private boolean isValidLaunchDuration(long duration) {
+        if (duration > 0) return true;
+        LogUtils.w(TAG, "Skip automatic launch with invalid duration:" + duration);
+        return false;
+    }
+
+    private long readProcessStartTimeline() {
+        return Build.VERSION.SDK_INT < 24 && legacyStartTime > 0
+                ? legacyStartTime : Utils.getAppStartTimeNs();
     }
 
 
@@ -233,6 +289,20 @@ class FTAppStartCounter {
         }
     }
 
+    void captureLegacyStart(long nanoTimeLine) {
+        if (legacyStartTime == 0 && !firstDrawDone.get()) {
+            legacyStartTime = nanoTimeLine;
+        }
+    }
+
+    void onLegacyActivityCreated() {
+        if (!firstDrawDone.get()) {
+            if (firstActivityObservedTimeline == 0) firstActivityObservedTimeline = System.nanoTime();
+            legacyActivityObserved = true;
+            appStateMonitor.onFirstActivityObserved();
+        }
+    }
+
     /**
      * Record Application.onCreate() timestamp
      *
@@ -242,7 +312,10 @@ class FTAppStartCounter {
         // Repeated Application hooks must preserve the first launch snapshot.
         if (!firstDrawDone.get() && applicationOnCreateTimeLine == 0) {
             applicationOnCreateTimeLine = nanoTimeLine;
+            processStartTimeline = readProcessStartTimeline();
             launchFromBackground = isLaunchFromBackground(application);
+            appStateMonitor.onApplicationCreated(application);
+            if (launchFromBackground) appStateMonitor.onBackgroundOrigin();
             LogUtils.d(TAG, "appOnCreate:" + nanoTimeLine
                     + ",launchFromBackground:" + launchFromBackground);
         }
@@ -258,19 +331,32 @@ class FTAppStartCounter {
             applicationOnCreateCompletedTimeLine = nanoTimeLine;
             LogUtils.d(TAG, "appOnCreateCompleted:" + nanoTimeLine
                     + ",firstActivityPreCreate:" + firstActivityPreOnActivityTimeline);
-            if (firstActivityPreOnActivityTimeline == 0 && !foregroundDuringLaunch) {
-                launchFromBackground = true;
-                LogUtils.d(TAG, "launchFromBackground:true,noActivityAfterApplication");
-            }
+            // A normal launcher Activity can arrive in a later main-loop message.
+            // Missing Activity callbacks here are not evidence of a background origin.
+            appStateMonitor.onApplicationReady();
+        }
+    }
+
+    boolean isWaitingForFirstActivity() {
+        return isLaunchStatePending() && firstActivityPreOnActivityTimeline == 0
+                && !legacyActivityObserved && !foregroundDuringLaunch;
+    }
+
+    void onBackgroundBeforeFirstActivity(int importance) {
+        if (isWaitingForFirstActivity()) {
+            launchFromBackground = true;
+            LogUtils.d(TAG, "launchFromBackground:true,backgroundBeforeFirstActivity,importance:"
+                    + importance);
         }
     }
 
     /**
-     * Records app-wide lifecycle changes until the cold-start measurement ends.
+     * Records this process's lifecycle changes until its cold-start measurement ends.
      */
     void onAppForeground() {
         if (!firstDrawDone.get()) {
             foregroundDuringLaunch = true;
+            appStateMonitor.onFirstActivityObserved();
         }
     }
 
@@ -278,6 +364,10 @@ class FTAppStartCounter {
         if (!firstDrawDone.get()) {
             backgroundDuringLaunch = true;
         }
+    }
+
+    boolean isLaunchStatePending() {
+        return !firstDrawDone.get() && !launchFromBackground && !backgroundDuringLaunch;
     }
 
     String getColdStartLaunchType() {

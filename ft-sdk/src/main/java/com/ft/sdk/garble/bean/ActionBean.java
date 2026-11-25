@@ -6,6 +6,7 @@ import com.ft.sdk.FTRUMInnerManager;
 import com.ft.sdk.garble.utils.Constants;
 import com.ft.sdk.garble.utils.LogUtils;
 import com.ft.sdk.garble.utils.Utils;
+import com.ft.sdk.internal.RUMCustomKeys;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -19,6 +20,8 @@ import java.util.Iterator;
 public class ActionBean {
     /** Explicit stop only; automatic completion keeps the original interaction start. */
     public Long interactionStopTimeNano;
+    /** Frozen occurrence interval, persisted with existing action attributes. */
+    public String frozenAppState;
 
     public long getInteractionTimeNano() {
         return interactionStopTimeNano == null ? startTimeNanoForDuration : interactionStopTimeNano;
@@ -110,21 +113,21 @@ public class ActionBean {
     /**
      * Action additional properties, {@link  Constants#KEY_RUM_SDK_INNER_KEY_PROPERTY}
      */
-    HashMap<String, Object> property = new HashMap<>();
+    HashMap<String, Object> property = RUMCustomKeys.newMap();
 
     public HashMap<String, Object> getProperty() {
         return property;
     }
 
 
-    HashMap<String, Object> tags = new HashMap<>();
+    HashMap<String, Object> tags = RUMCustomKeys.newMap();
 
     public HashMap<String, Object> getTags() {
         return tags;
     }
 
     public void setTags(HashMap<String, Object> tags) {
-        this.tags = tags;
+        this.tags = RUMCustomKeys.copy(tags);
     }
 
     public ActionBean() {
@@ -266,8 +269,10 @@ public class ActionBean {
      */
     public String getAttrJsonString() {
         HashMap<String, Object> map = new HashMap<>();
+        map.put(RUMCustomKeys.CACHE_KEY, RUMCustomKeys.cache(tags, property));
         if (interactionStopTimeNano != null) map.put("interaction_stop_time_nano", interactionStopTimeNano);
         map.put(Constants.KEY_RUM_SESSION_START_REASON, sessionStartReason);
+        if (frozenAppState != null) map.put("frozen_app_state", frozenAppState);
         map.put(Constants.KEY_RUM_SDK_INNER_KEY_PROPERTY, property);
         map.put(Constants.KEY_RUM_SDK_INNER_KEY_TAGS, tags);
         map.put(Constants.KEY_RUM_SDK_INNER_KEY_COLLECT_TYPE, collectType);
@@ -286,8 +291,10 @@ public class ActionBean {
         try {
 
             JSONObject json = new JSONObject(jsonString);
+            RUMCustomKeys.restore(json.optJSONObject(RUMCustomKeys.CACHE_KEY), tags, property);
             interactionStopTimeNano = !json.isNull("interaction_stop_time_nano")
                     ? json.getLong("interaction_stop_time_nano") : null;
+            frozenAppState = json.optString("frozen_app_state", "unknown");
             sessionStartReason = json.optString(Constants.KEY_RUM_SESSION_START_REASON, "unknown");
             this.collectType = json.getString(Constants.KEY_RUM_SDK_INNER_KEY_COLLECT_TYPE);
             this.startTimeNanoForDuration= json.optLong(Constants.KEY_RUM_SDK_INNER_KEY_START_TIME_NANO);

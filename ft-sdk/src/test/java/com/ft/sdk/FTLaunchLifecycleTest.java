@@ -38,6 +38,7 @@ public class FTLaunchLifecycleTest {
         originalAppStartTime = FTApplication.APP_START_TIME;
         FTApplication.APP_START_TIME = System.nanoTime() - 1_000_000L;
         counter = FTAppStartCounter.get();
+        counter.appStateMonitor.stop();
         for (String field : new String[]{"applicationOnCreateTimeLine", "launchFromBackground",
                 "foregroundDuringLaunch", "backgroundDuringLaunch"}) {
             originalState.put(field, Whitebox.getInternalState(counter, field));
@@ -55,6 +56,7 @@ public class FTLaunchLifecycleTest {
 
     @After
     public void restoreStartup() {
+        counter.appStateMonitor.stop();
         FTApplication.APP_START_TIME = originalAppStartTime;
         Map<Activity, ?> pending = Whitebox.getInternalState(counter, "firstDrawListeners");
         for (Activity activity : new java.util.ArrayList<>(pending.keySet())) {

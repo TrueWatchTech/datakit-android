@@ -2,6 +2,7 @@ package com.ft.launchfixture;
 
 import android.app.Activity;
 import android.app.Application;
+import android.content.Context;
 import android.os.Bundle;
 import android.os.SystemClock;
 
@@ -14,8 +15,21 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.File;
+
 public class LaunchApplication extends Application {
     public static final JSONArray EVENTS = new JSONArray();
+    static long preApplicationDelayNs;
+
+    @Override
+    protected void attachBaseContext(Context base) {
+        super.attachBaseContext(base);
+        if (new File(base.getFilesDir(), "delay-before-application").isFile()) {
+            long start = System.nanoTime();
+            SystemClock.sleep(12_000);
+            preApplicationDelayNs = System.nanoTime() - start;
+        }
+    }
 
     @Override
     public void onCreate() {
@@ -42,6 +56,7 @@ public class LaunchApplication extends Application {
             JSONObject event = new JSONObject();
             event.put("event", name);
             event.put("uptime_ms", SystemClock.uptimeMillis());
+            event.put("monotonic_ns", System.nanoTime());
             event.put("launch_type", LaunchAcceptanceProbe.type());
             EVENTS.put(event);
         } catch (JSONException e) {

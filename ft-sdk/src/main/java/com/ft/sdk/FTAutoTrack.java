@@ -24,6 +24,7 @@ import com.ft.sdk.garble.utils.LogUtils;
 import com.ft.sdk.garble.utils.PackageUtils;
 import com.ft.sdk.garble.utils.TBSWebViewUtils;
 import com.ft.sdk.garble.utils.Utils;
+import com.ft.sdk.internal.RUMCustomKeys;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -44,6 +45,89 @@ import okhttp3.WebSocketListener;
  */
 public class FTAutoTrack {
     public final static String TAG = Constants.LOG_TAG_PREFIX + "AutoTrack";
+    private static boolean lifecycleCallbacksRegistered;
+    private static Application lifecycleApplication;
+    private static FTActivityLifecycleCallbacks lifecycleCallbacks;
+    private static boolean lifecycleStopped;
+    private static java.util.List<java.lang.ref.WeakReference<Activity>> stoppedStartedActivities;
+    private static java.util.List<java.lang.ref.WeakReference<Activity>> stoppedResumedActivities;
+
+    static synchronized void stopLifecycle() {
+        if (lifecycleCallbacksRegistered) {
+            FTAppStateMonitor monitor = FTAppStartCounter.get().appStateMonitor;
+            stoppedStartedActivities = toWeakReferences(monitor.snapshotStarted());
+            stoppedResumedActivities = toWeakReferences(monitor.snapshotResumed());
+        }
+        if (lifecycleApplication != null && lifecycleCallbacks != null) {
+            lifecycleApplication.unregisterActivityLifecycleCallbacks(lifecycleCallbacks);
+            lifecycleCallbacks.release();
+        }
+        lifecycleApplication = null;
+        lifecycleCallbacks = null;
+        lifecycleCallbacksRegistered = false;
+        lifecycleStopped = true;
+        FTAppStartCounter.get().appStateMonitor.stop();
+    }
+
+    static synchronized void restartLifecycleIfStopped() {
+        if (!lifecycleStopped) return;
+        java.util.List<Activity> started = collectForegroundActivities(stoppedStartedActivities);
+        java.util.List<Activity> resumed = collectForegroundActivities(stoppedResumedActivities);
+        stoppedStartedActivities = null;
+        stoppedResumedActivities = null;
+        startApp(getApplication());
+        if (lifecycleCallbacks != null && (!started.isEmpty() || !resumed.isEmpty())) {
+            lifecycleCallbacks.restoreForegroundActivities(started, resumed);
+        }
+    }
+
+    static synchronized void syncActiveActivitiesForRum() {
+        if (lifecycleCallbacks != null) {
+            lifecycleCallbacks.attachActiveActivitiesForRum();
+        }
+    }
+
+    private static java.util.List<java.lang.ref.WeakReference<Activity>> toWeakReferences(
+            java.util.List<Activity> activities) {
+        if (activities == null || activities.isEmpty()) return null;
+        java.util.List<java.lang.ref.WeakReference<Activity>> refs = new java.util.ArrayList<>(activities.size());
+        for (Activity activity : activities) {
+            if (activity != null) refs.add(new java.lang.ref.WeakReference<>(activity));
+        }
+        return refs;
+    }
+
+    private static java.util.List<Activity> collectForegroundActivities(
+            java.util.List<java.lang.ref.WeakReference<Activity>> refs) {
+        java.util.List<Activity> result = new java.util.ArrayList<>();
+        if (refs == null || refs.isEmpty()) return result;
+        for (java.lang.ref.WeakReference<Activity> ref : refs) {
+            Activity activity = ref == null ? null : ref.get();
+            if (isActivityStillForeground(activity)) {
+                result.add(activity);
+            }
+        }
+        return result;
+    }
+
+    private static boolean isActivityStillForeground(Activity activity) {
+        if (activity == null || activity.isFinishing() || activity.isDestroyed()) {
+            return false;
+        }
+        try {
+            android.app.ActivityManager.RunningAppProcessInfo processInfo =
+                    new android.app.ActivityManager.RunningAppProcessInfo();
+            android.app.ActivityManager.getMyMemoryState(processInfo);
+            if (processInfo.importance > android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE) {
+                return false;
+            }
+        } catch (RuntimeException ignored) {
+            // Fall back to window visibility when the process snapshot is unavailable.
+        }
+        android.view.Window window = activity.getWindow();
+        View decor = window == null ? null : window.peekDecorView();
+        return decor == null || decor.getVisibility() == View.VISIBLE;
+    }
 
 
     /**
@@ -52,9 +136,14 @@ public class FTAutoTrack {
      * <p>
      * This method was originally called by the FT Plugin
      */
-    public static void startApp(Application app) {
+    public static synchronized void startApp(Application app) {
         try {
-            FTAppStartCounter.get().appOnCreate(System.nanoTime(), app != null ? app : getApplication());
+            long startTime = System.nanoTime();
+            FTAppStartCounter.get().captureLegacyStart(startTime);
+            FTAppStartCounter.get().appOnCreate(startTime, app != null ? app : getApplication());
+            if (lifecycleCallbacksRegistered) return;
+            lifecycleStopped = false;
+            FTAppStartCounter.get().appStateMonitor.onApplicationCreated(app != null ? app : getApplication());
             LogUtils.d(TAG, "startApp:" + app);
             //Determine if it is the main process
             FTActivityLifecycleCallbacks life = new FTActivityLifecycleCallbacks();
@@ -62,9 +151,15 @@ public class FTAutoTrack {
                 Class<?> clazz = PackageUtils.getSophixClass();
                 if (clazz == null || !clazz.isInstance(app)) {
                     app.registerActivityLifecycleCallbacks(life);
+                    lifecycleApplication = app;
+                    lifecycleCallbacks = life;
+                    lifecycleCallbacksRegistered = true;
                 }
             } else {
                 getApplication().registerActivityLifecycleCallbacks(life);
+                lifecycleApplication = getApplication();
+                lifecycleCallbacks = life;
+                lifecycleCallbacksRegistered = true;
             }
             new Handler(Looper.getMainLooper()).post(new Runnable() {
                 @Override
@@ -478,7 +573,7 @@ public class FTAutoTrack {
 
             if (action != null) {
                 FTRUMInnerManager.get().startAction(action.getActionName(), Constants.EVENT_NAME_CLICK,
-                        mergeProperties(heatMapProperties, action.getProperty()));
+                        mergeActionProperties(heatMapProperties, action.getProperty()));
             }
 
         } else {
@@ -506,9 +601,16 @@ public class FTAutoTrack {
             }
 
             LogUtils.showAlias("clickView:" + vtp + ",extra:" + extra);
-            FTRUMInnerManager.get().startAction(vtp, Constants.EVENT_NAME_CLICK, heatMapProperties);
+            FTRUMInnerManager.get().startAction(vtp, Constants.EVENT_NAME_CLICK, RUMCustomKeys.copy(heatMapProperties));
 
         }
+    }
+
+    private static HashMap<String, Object> mergeActionProperties(HashMap<String, Object> system,
+                                                                HashMap<String, Object> user) {
+        HashMap<String, Object> result = RUMCustomKeys.copy(system);
+        RUMCustomKeys.putUserProperties(result, user);
+        return result;
     }
 
     private static HashMap<String, Object> mergeProperties(HashMap<String, Object> first,
@@ -554,18 +656,34 @@ public class FTAutoTrack {
                                         HashMap<String, Long> applicationInit,
                                         HashMap<String, Long> firstFrameInit,
                                         String appLaunchType) {
+        putRUMLaunchPerformance(isCold ? ActionSourceType.LAUNCH_COLD : ActionSourceType.LAUNCH_HOT,
+                duration, startTime, preApplicationInit, applicationInit, firstFrameInit, appLaunchType);
+    }
+
+    static void putRUMWarmLaunchPerformance(long duration, long startTime) {
+        putRUMLaunchPerformance(ActionSourceType.LAUNCH_WARM, duration, startTime,
+                null, null, null, null);
+    }
+
+    private static void putRUMLaunchPerformance(ActionSourceType sourceType, long duration, long startTime,
+                                               HashMap<String, Long> preApplicationInit,
+                                               HashMap<String, Long> applicationInit,
+                                               HashMap<String, Long> firstFrameInit,
+                                               String appLaunchType) {
+        boolean isCold = sourceType == ActionSourceType.LAUNCH_COLD;
+        boolean isWarm = sourceType == ActionSourceType.LAUNCH_WARM;
+        String actionType = isCold ? Constants.ACTION_TYPE_LAUNCH_COLD
+                : isWarm ? Constants.ACTION_TYPE_LAUNCH_WARM : Constants.ACTION_TYPE_LAUNCH_HOT;
+        String actionName = isCold ? Constants.ACTION_NAME_LAUNCH_COLD
+                : isWarm ? Constants.ACTION_NAME_LAUNCH_WARM : Constants.ACTION_NAME_LAUNCH_HOT;
         FTRUMConfigManager manager = FTRUMConfigManager.get();
         FTActionTrackingHandler handler = manager.getConfig().getActionTrackingHandler();
         if (handler != null) {
-            HandlerAction action = handler.resolveHandlerAction(new ActionEventWrapper(null, isCold ? ActionSourceType.LAUNCH_COLD
-                    : ActionSourceType.LAUNCH_HOT, null));
+            HandlerAction action = handler.resolveHandlerAction(new ActionEventWrapper(null, sourceType, null));
 
             if (action != null) {
-                HashMap<String, Object> actionProperty = action.getProperty();
+                HashMap<String, Object> actionProperty = RUMCustomKeys.userProperties(action.getProperty());
                 if (isCold) {
-                    if (actionProperty == null) {
-                        actionProperty = new HashMap<>();
-                    }
                     addLaunchType(actionProperty, appLaunchType);
 
                     // Handle preApplicationInit
@@ -594,7 +712,7 @@ public class FTAutoTrack {
                 }
                 FTRUMInnerManager.get().addAction(
                         action.getActionName(),
-                        isCold ? Constants.ACTION_TYPE_LAUNCH_COLD : Constants.ACTION_TYPE_LAUNCH_HOT,
+                        actionType,
                         duration, startTime, actionProperty);
 
             }
@@ -603,7 +721,7 @@ public class FTAutoTrack {
 
             // Check if any map is not null
             if (isCold || preApplicationInit != null || applicationInit != null || firstFrameInit != null) {
-                actionProperty = new HashMap<>();
+                actionProperty = RUMCustomKeys.newMap();
                 if (isCold) {
                     addLaunchType(actionProperty, appLaunchType);
                 }
@@ -634,8 +752,8 @@ public class FTAutoTrack {
             }
 
             FTRUMInnerManager.get().addAction(
-                    isCold ? Constants.ACTION_NAME_LAUNCH_COLD : Constants.ACTION_NAME_LAUNCH_HOT,
-                    isCold ? Constants.ACTION_TYPE_LAUNCH_COLD : Constants.ACTION_TYPE_LAUNCH_HOT,
+                    actionName,
+                    actionType,
                     duration, startTime, actionProperty);
         }
     }

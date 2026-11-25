@@ -10,6 +10,7 @@ import com.ft.sdk.garble.utils.Utils;
 
 import java.util.HashMap;
 
+/** Manually reports RUM events after {@link FTSdk#initRUMWithConfig(FTRUMConfig)} enables collection. */
 public class FTRUMGlobalManager {
 
     private static class SingletonHolder {
@@ -33,11 +34,11 @@ public class FTRUMGlobalManager {
     }
 
     /**
-     * Add Action，this type of data cannot be associated with Error, Resource, LongTask data
+     * Records a completed action without opening a correlation window for subsequent events.
      *
      * @param actionName action name
      * @param actionType action type
-     * @param duration   nanosecond, duration
+     * @param duration   action duration in nanoseconds
      * @param property   extended attributes
      */
     public void addAction(String actionName, String actionType, long duration, HashMap<String, Object> property) {
@@ -47,7 +48,7 @@ public class FTRUMGlobalManager {
     }
 
     /**
-     * Add Action, this type of data cannot be associated with Error, Resource, LongTask data
+     * Records a completed action without opening a correlation window for subsequent events.
      *
      * @param actionName action name
      * @param actionType action type
@@ -59,7 +60,7 @@ public class FTRUMGlobalManager {
     }
 
     /**
-     * Add Action, this type of data cannot be associated with Error, Resource, LongTask data
+     * Records a completed action without opening a correlation window for subsequent events.
      *
      * @param actionName action name
      * @param actionType action type
@@ -72,11 +73,11 @@ public class FTRUMGlobalManager {
     }
 
     /**
-     * Add Action, this type of data cannot be associated with Error, Resource, LongTask data
+     * Records a completed action without opening a correlation window for subsequent events.
      *
      * @param actionName action name
      * @param actionType action type
-     * @param duration   nanosecond, duration
+     * @param duration   action duration in nanoseconds
      */
     public void addAction(String actionName, String actionType, long duration) {
         if (innerManager != null) {
@@ -85,13 +86,9 @@ public class FTRUMGlobalManager {
     }
 
     /**
-     * Add action
-     * <p>
-     * The startAction method includes a duration calculation mechanism and attempts
-     * to associate data with nearby Resource, LongTask, and Error events during that period.
-     * It has a 100 ms frequency protection mechanism and is recommended for user interaction-type events.
-     * If you need to call actions frequently, please use addAction instead. This method does not conflict
-     * with startAction and does not associate with the current Resource, LongTask, or Error events.
+     * Starts a timed action that can link related Resource, LongTask and Error events.
+     * A call made while an action remains open does not start another. To record each
+     * occurrence independently, use {@link #addAction(String, String)}.
      *
      * @param actionName action name
      * @param actionType action type
@@ -103,7 +100,7 @@ public class FTRUMGlobalManager {
     }
 
     /**
-     * Add action
+     * Starts a timed action with custom attributes. See {@link #startAction(String, String)}.
      *
      * @param actionName action name
      * @param actionType action type
@@ -117,9 +114,9 @@ public class FTRUMGlobalManager {
 
 
     /**
-     * resource start
+     * Starts timing a manual resource. Use the same ID to stop timing and supply the network data.
      *
-     * @param resourceId resource Id
+     * @param resourceId unique ID for this request, including when multiple requests share a URL
      */
     public void startResource(String resourceId) {
         if (innerManager != null) {
@@ -129,9 +126,9 @@ public class FTRUMGlobalManager {
 
 
     /**
-     * resource start
+     * Starts timing a manual resource. Use the same ID to stop timing and supply the network data.
      *
-     * @param resourceId resource Id
+     * @param resourceId unique ID for this request, including when multiple requests share a URL
      * @param property   additional attribute parameters
      */
     public void startResource(String resourceId, HashMap<String, Object> property) {
@@ -142,9 +139,9 @@ public class FTRUMGlobalManager {
 
 
     /**
-     * resource end
+     * Stops timing the resource identified by {@code resourceId}.
      *
-     * @param resourceId resource Id
+     * @param resourceId unique ID for this request, including when multiple requests share a URL
      */
     public void stopResource(String resourceId) {
         if (innerManager != null) {
@@ -154,7 +151,9 @@ public class FTRUMGlobalManager {
 
 
     /**
-     * @param resourceId resource Id
+     * Stops timing the resource and adds the supplied attributes.
+     *
+     * @param resourceId unique ID for this request, including when multiple requests share a URL
      * @param property   additional attribute parameters
      */
     public void stopResource(final String resourceId, HashMap<String, Object> property) {
@@ -165,7 +164,7 @@ public class FTRUMGlobalManager {
 
 
     /**
-     * Create view
+     * Supplies loading time before starting a View with the same name.
      *
      * @param viewName view name
      * @param loadTime load time, nanosecond
@@ -178,7 +177,11 @@ public class FTRUMGlobalManager {
         }
     }
 
-    /** Records load duration; app_state uses the View start when no origin is supplied. */
+    /**
+     * Supplies loading time before starting the named View. The View start is used for app state.
+     * @param viewName name passed to the subsequent startView call
+     * @param loadTime loading duration in nanoseconds
+     */
     public void onCreateView(String viewName, long loadTime) {
         if (innerManager != null) {
             innerManager.onCreateView(viewName, loadTime);
@@ -197,7 +200,7 @@ public class FTRUMGlobalManager {
     }
 
     /**
-     * view start
+     * Starts a View with a caller-managed lifecycle.
      *
      * @param viewName current page name
      */
@@ -208,7 +211,7 @@ public class FTRUMGlobalManager {
     }
 
     /**
-     * view start
+     * Starts a View with a caller-managed lifecycle.
      *
      * @param viewName current page name
      * @param property additional attribute parameters
@@ -225,6 +228,8 @@ public class FTRUMGlobalManager {
      * Automatic Views close at the native background boundary. On foreground, start a
      * new View without resubmitting consumed loading data. Existing overloads remain Manual.
      *
+     * @param viewName page name to report
+     * @param property custom View attributes, or null
      * @param trackingType lifecycle ownership; null is treated as Manual
      * @return the new View ID, or null when RUM is disabled
      */
@@ -238,6 +243,9 @@ public class FTRUMGlobalManager {
      * overload to ignore duplicate or delayed stops belonging to an earlier View.
      * Frameworks must cancel extra background stops: an unscoped stop arriving after
      * a new View starts cannot be attributed to the previous View.
+     *
+     * @param viewId ID returned when this View started
+     * @param property attributes to merge into the matching View, or null
      */
     public void stopView(String viewId, HashMap<String, Object> property) {
         if (innerManager != null) innerManager.stopViewById(viewId, property);
@@ -245,7 +253,7 @@ public class FTRUMGlobalManager {
 
 
     /**
-     * view end
+     * Ends the current View, if one is active.
      */
     public void stopView() {
         if (innerManager != null) {
@@ -254,7 +262,7 @@ public class FTRUMGlobalManager {
     }
 
     /**
-     * view end
+     * Ends the current View, if one is active.
      *
      * @param property additional attribute parameters
      */
@@ -267,8 +275,8 @@ public class FTRUMGlobalManager {
     /**
      * Add error information, default AppState.RUN
      *
-     * @param log       log
-     * @param message   message
+     * @param log       error stack or diagnostic details
+     * @param message   short error message
      * @param errorType error type
      */
     public void addError(String log, String message, String errorType) {
@@ -280,8 +288,8 @@ public class FTRUMGlobalManager {
     /**
      * Add error information
      *
-     * @param log       log
-     * @param message   message
+     * @param log       error stack or diagnostic details
+     * @param message   short error message
      * @param errorType error type
      * @param state     program running state
      */
@@ -294,11 +302,11 @@ public class FTRUMGlobalManager {
     /**
      * Add error
      *
-     * @param log       log
-     * @param message   message
+     * @param log       error stack or diagnostic details
+     * @param message   short error message
      * @param errorType error type
      * @param state     program running state
-     * @param dateline  occurrence time, nanosecond
+     * @param dateline  time of occurrence in nanoseconds since the Unix epoch
      */
     public void addError(String log, String message, long dateline, String errorType,
                          AppState state) {
@@ -312,8 +320,8 @@ public class FTRUMGlobalManager {
     /**
      * Add error information
      *
-     * @param log       log
-     * @param message   message
+     * @param log       error stack or diagnostic details
+     * @param message   short error message
      * @param errorType error type
      * @param state     program running state
      * @param property  additional attribute parameters
@@ -328,11 +336,11 @@ public class FTRUMGlobalManager {
     /**
      * Add error
      *
-     * @param log       log
-     * @param message   message
+     * @param log       error stack or diagnostic details
+     * @param message   short error message
      * @param errorType error type
      * @param state     program running state
-     * @param dateline  occurrence time, nanosecond
+     * @param dateline  time of occurrence in nanoseconds since the Unix epoch
      * @param property  additional attribute parameters
      */
     public void addError(String log, String message, long dateline, String errorType,
@@ -347,8 +355,8 @@ public class FTRUMGlobalManager {
     /**
      * Add error information
      *
-     * @param log       log
-     * @param message   message
+     * @param log       error stack or diagnostic details
+     * @param message   short error message
      * @param errorType error type
      * @param state     program running state
      */
@@ -361,11 +369,11 @@ public class FTRUMGlobalManager {
     /**
      * Add error
      *
-     * @param log       log
-     * @param message   message
+     * @param log       error stack or diagnostic details
+     * @param message   short error message
      * @param errorType error type
      * @param state     program running state
-     * @param dateline  occurrence time, nanosecond
+     * @param dateline  time of occurrence in nanoseconds since the Unix epoch
      */
     public void addError(String log, String message, long dateline, ErrorType errorType,
                          AppState state) {
@@ -379,8 +387,8 @@ public class FTRUMGlobalManager {
     /**
      * Add error information
      *
-     * @param log       log
-     * @param message   message
+     * @param log       error stack or diagnostic details
+     * @param message   short error message
      * @param errorType error type
      * @param state     program running state
      * @param property  additional attribute parameters
@@ -395,11 +403,11 @@ public class FTRUMGlobalManager {
     /**
      * Add error
      *
-     * @param log       log
-     * @param message   message
+     * @param log       error stack or diagnostic details
+     * @param message   short error message
      * @param errorType error type
      * @param state     program running state
-     * @param dateline  occurrence time, nanosecond
+     * @param dateline  time of occurrence in nanoseconds since the Unix epoch
      * @param property  additional attribute parameters
      */
     public void addError(String log, String message, long dateline, ErrorType errorType,
@@ -438,7 +446,8 @@ public class FTRUMGlobalManager {
 
 
     /**
-     * Set network transmission content
+     * Supplies HTTP details and network timings for a manually tracked request.
+     * Use the ID from {@link #startResource(String)} and {@link #stopResource(String)}.
      *
      * @param resourceId    resource id
      * @param params        {@link ResourceParams} request content information

@@ -37,11 +37,12 @@ public class FTUIBlockManager {
                 method = x.substring(PREFIX_METHOD_DISPATCH_START.length());
                 startTime = now;
                 startEpoch = com.ft.sdk.garble.utils.Utils.getCurrentNanoTime();
+                startedInBackground = !FTActivityLifecycleCallbacks.isAppInForeground();
             } else if (x.startsWith(PREFIX_METHOD_DISPATCH_END)) {
                 long duration = now - startTime;
                 if (duration > blockDurationNS) {
-                    if (!FTActivityLifecycleCallbacks.isAppInForeground()) return;
-                    // only record data when page is in foreground
+                    if (startedInBackground || !FTActivityLifecycleCallbacks.isAppInForeground()) return;
+                    // A dispatch that began in background stays excluded after foreground return.
                     FTRUMInnerManager.get().addLongTask(method, duration, startEpoch, false, null);
                 }
 
@@ -52,6 +53,7 @@ public class FTUIBlockManager {
 
     private long startTime;
     private long startEpoch;
+    private boolean startedInBackground;
     private String method;
 
     /**

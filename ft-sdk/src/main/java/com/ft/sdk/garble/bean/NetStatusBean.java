@@ -4,27 +4,35 @@ package com.ft.sdk.garble.bean;
 import java.util.HashMap;
 
 /**
- * Network resource request, resource metric data
+ * Network measurements for a manually reported RUM resource. Use a common monotonic
+ * nanosecond clock for all phase boundaries (for example {@link System#nanoTime()}).
+ * {@link #callStartEpoch} uses Unix epoch nanoseconds instead. Set {@link #phaseTimingKnown}
+ * to false when only the total request duration is available. Phase offset getters subtract
+ * the raw timestamps, so only use them when both boundaries are known.
  */
 public class NetStatusBean {
 
     /**
-     * Request start time @deprecated Use {@link #callStartTime} instead.
+     * Request start time.
+     * @deprecated Use {@link #callStartTime} instead.
      */
     @Deprecated
     public long fetchStartTime = -1;
     /**
-     * request header start time @deprecated Use {@link #headerStartTime} instead.
+     * Legacy header start time.
+     * @deprecated Use {@link #headerStartTime} instead.
      */
     @Deprecated
     public long requestStartTime = -1;
     /**
-     * response start time  @deprecated Use {@link #bodyStartTime} instead.
+     * Legacy response start time.
+     * @deprecated Use {@link #bodyStartTime} instead.
      */
     @Deprecated
     public long responseStartTime = -1;
     /**
-     * response end time {@link #bodyEndTime} instead.
+     * Response end time.
+     * @deprecated Use {@link #bodyEndTime} instead.
      */
     @Deprecated
     public long responseEndTime = -1;
@@ -33,6 +41,7 @@ public class NetStatusBean {
      * Request start time from call Start
      */
     public long callStartTime = -1;
+    /** Wall-clock start of the same call in Unix epoch nanoseconds, or -1 when unavailable. */
     public long callStartEpoch = -1;
 
     /**
@@ -100,12 +109,12 @@ public class NetStatusBean {
     public String requestHost;
 
     /**
-     * Request body size
+     * Request body size in bytes.
      */
     public long requestBodySize = 0;
 
     /**
-     * Response body size
+     * Response body size in bytes.
      */
     public long responseBodySize = 0;
 
@@ -120,11 +129,7 @@ public class NetStatusBean {
     /** False when only total duration is observable. */
     public boolean phaseTimingKnown = true;
 
-    /**
-     * Get tcp connection duration
-     *
-     * @return
-     */
+    /** @return elapsed TCP connection time in nanoseconds */
     public long getTcpTime() {
         if (tcpEndTime > tcpStartTime) {
             return tcpEndTime - tcpStartTime;
@@ -132,20 +137,12 @@ public class NetStatusBean {
         return 0;
     }
 
-    /**
-     * Relative connect start time to {@link #callStartTime}
-     *
-     * @return
-     */
+    /** @return offset from call start to TCP connection start in nanoseconds */
     public long getConnectStartTime() {
         return tcpStartTime - callStartTime;
     }
 
-    /**
-     * Get dns resolution duration
-     *
-     * @return
-     */
+    /** @return elapsed DNS lookup time in nanoseconds */
     public long getDNSTime() {
         if (dnsEndTime > dnsStartTime) {
             return dnsEndTime - dnsStartTime;
@@ -153,21 +150,13 @@ public class NetStatusBean {
         return 0;
     }
 
-    /**
-     * Relative dns start time to {@link #callStartTime}
-     *
-     * @return
-     */
+    /** @return offset from call start to DNS lookup start in nanoseconds */
     public long getDNSStartTime() {
         return dnsStartTime - callStartTime;
     }
 
 
-    /**
-     * body content load duration
-     *
-     * @return
-     */
+    /** @return elapsed response body time in nanoseconds */
     public long getDownloadTime() {
         if (bodyEndTime > bodyStartTime) {
             return bodyEndTime - bodyStartTime;
@@ -175,20 +164,12 @@ public class NetStatusBean {
         return 0;
     }
 
-    /**
-     * Relative body download start time to {@link #callStartTime}
-     *
-     * @return
-     */
+    /** @return offset from call start to response body start in nanoseconds */
     public long getDownloadTimeStart() {
         return bodyStartTime - callStartTime;
     }
 
-    /**
-     * Get request response duration
-     *
-     * @return
-     */
+    /** @return elapsed time from response headers start to response body end in nanoseconds */
     public long getResponseTime() {
         if (bodyEndTime > headerStartTime) {
             return bodyEndTime - headerStartTime;
@@ -197,11 +178,7 @@ public class NetStatusBean {
     }
 
 
-    /**
-     * Get ttfb duration
-     *
-     * @return
-     */
+    /** @return elapsed time between response headers start and end in nanoseconds */
     public long getTTFB() {
         if (headerEndTime > headerStartTime) {
             return headerEndTime - headerStartTime;
@@ -209,30 +186,18 @@ public class NetStatusBean {
         return 0;
     }
 
-    /**
-     * First byte duration
-     *
-     * @return
-     */
+    /** @return same duration as {@link #getTTFB()} in nanoseconds */
     public long getFirstByteTime() {
         return getTTFB();
     }
 
 
-    /**
-     * Relative first byte start time to {@link #callStartTime}
-     *
-     * @return
-     */
+    /** @return offset from call start to response headers start in nanoseconds */
     public long getFirstByteStartTime() {
         return headerStartTime - callStartTime;
     }
 
-    /**
-     * Whole request duration
-     *
-     * @return
-     */
+    /** @return elapsed time from call start to response body end in nanoseconds */
     public long getHoleRequestTime() {
         if (bodyEndTime > callStartTime) {
             return bodyEndTime - callStartTime;
@@ -240,12 +205,7 @@ public class NetStatusBean {
         return 0;
     }
 
-    /**
-     * ssl connection duration
-     *
-     * @return
-     */
-
+    /** @return elapsed TLS handshake time in nanoseconds */
     public long getSSLTime() {
         if (sslEndTime > sslStartTime) {
             return sslEndTime - sslStartTime;
@@ -253,11 +213,7 @@ public class NetStatusBean {
         return 0;
     }
 
-    /**
-     * Relative ssl start time to {@link #callStartTime}
-     *
-     * @return
-     */
+    /** @return offset from call start to TLS handshake start in nanoseconds */
     public long getSslStartTime() {
         return sslStartTime - callStartTime;
     }

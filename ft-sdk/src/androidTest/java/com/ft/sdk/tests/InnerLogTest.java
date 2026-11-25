@@ -69,6 +69,37 @@ public class InnerLogTest extends FTBaseTest {
         Assert.assertTrue(content.contains(INSERT_LOG_CONTENT));
     }
 
+    @Test
+    public void defaultLogAndArchiveRecoverTogetherAfterCacheEviction() throws IOException {
+        File cacheDir = InstrumentationRegistry.getInstrumentation().getTargetContext().getCacheDir();
+        File root = new File(cacheDir, "log-test-" + System.nanoTime());
+        LogFileHelper helper = LogFileHelper.forDefaultLog(root, true);
+        File logs = new File(root, "ft_sdk/logs");
+        File active = new File(logs, "LogInner.log");
+        File archives = new File(logs, "LogBackup");
+        try {
+            helper.appendLog(new String(new char[55]).replace('\0', 'x'));
+            helper.appendLog("rotated");
+            File[] rotated = archives.listFiles();
+            Assert.assertNotNull(rotated);
+            Assert.assertEquals(1, rotated.length);
+            Assert.assertEquals(55, rotated[0].length());
+            Assert.assertTrue(rotated[0].delete());
+            Assert.assertTrue(archives.delete());
+            Assert.assertTrue(active.delete());
+            Assert.assertTrue(logs.delete());
+            helper.appendLog("after cache eviction");
+            Assert.assertTrue(Utils.readFile(active).contains("after cache eviction"));
+            Assert.assertTrue(archives.isDirectory());
+        } finally {
+            active.delete();
+            Utils.deleteFile(archives.getPath());
+            logs.delete();
+            new File(root, "ft_sdk").delete();
+            root.delete();
+        }
+    }
+
     /**
      * Log separation verification
      * {@link com.ft.sdk.garble.manager.LogFileHelper#TEST_SPLIT_FILE_SIZE}

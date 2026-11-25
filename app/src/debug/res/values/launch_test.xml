@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="launch_test_home_activity" translatable="false">com.ft.DebugMainActivity</string>
+    <string name="launch_test_entry">Launch tests</string>
+    <string name="launch_test_title">Cold start settings</string>
+    <string name="launch_test_apply_hint">Force stop SampleApp and reopen it to apply these settings on the next cold start.</string>
+    <string name="launch_test_delay_option">Delay the first home screen frame by 3 seconds</string>
+    <string name="launch_test_channel_option">Open a test screen in a separate process</string>
+    <string name="launch_test_instructions">To test a return from the background, press Home while the splash screen is visible. Wait a few seconds, then reopen SampleApp without clearing it from Recents.\n\nFor a normal cold start, turn both options off.</string>
+    <string name="launch_test_channel_instructions">Separate process test\n\nPress Home, wait 5 seconds, then tap the SampleApp icon. Leave SampleApp in Recents.\n\nThis test screen closes when it goes into the background. You will return to the home screen in SampleApp.</string>
+    <string name="launch_test_done">Done</string>
+    <style name="LaunchTestHomeTheme" parent="AppTheme" />
+</resources>

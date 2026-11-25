@@ -11,7 +11,6 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.Parcelable;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -24,6 +23,7 @@ import com.ft.sdk.garble.utils.Utils;
 import com.ft.sdk.internal.anr.historical.HistoricalAnrDataId;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 
 /**
  * @date 2025-08-17
@@ -45,8 +45,14 @@ public class FTContentProvider extends ContentProvider {
     public static final String PATH_EXEC_SQL_BATCH = "exec_sql_batch";
 
     // Call method name constants
+    /** @deprecated Raw SQL commands are rejected. */
+    @Deprecated
     public static final String METHOD_EXEC_SQL = "execSQL";
+    /** @deprecated Raw SQL commands are rejected. */
+    @Deprecated
     public static final String METHOD_EXEC_SQL_BATCH = "execSQLBatch";
+    static final String METHOD_UPDATE_AGGREGATE = "updateAggregate";
+    static final String METHOD_DELETE_OLDEST = "deleteOldest";
     public static final String METHOD_HISTORICAL_RUM_PERSIST = "historicalRumPersist";
     public static final String METHOD_HISTORICAL_RUM_COMMIT = "historicalRumCommit";
     /** @deprecated Historical ANR claims are now persisted in sidecar files. */
@@ -161,7 +167,7 @@ public class FTContentProvider extends ContentProvider {
     @Override
     public Uri insert(@NonNull Uri uri, @Nullable ContentValues values) {
         final String tableName = getTableName(uri);
-        if (tableName == null) {
+        if (tableName == null || !ProviderSql.validValues(tableName, values)) {
             return null;
         }
 
@@ -215,6 +221,7 @@ public class FTContentProvider extends ContentProvider {
                     int count = 0;
                     try {
                         for (ContentValues finalValue : finalValues) {
+                            if (!ProviderSql.validValues(tableName, finalValue)) continue;
                             long rowId = db.insert(tableName, null, finalValue);
                             if (rowId >= 0) {
                                 count++;
@@ -264,16 +271,16 @@ public class FTContentProvider extends ContentProvider {
     public int update(@NonNull Uri uri, @Nullable ContentValues values,
                       @Nullable String selection, @Nullable String[] selectionArgs) {
         final String tableName = getTableName(uri);
-        if (tableName == null) {
+        if (tableName == null || !ProviderSql.validValues(tableName, values)) {
             return 0;
         }
 
         final int[] resultCount = new int[1];
         final ContentValues finalValues = values;
-        final String finalSelection = selection;
         final String[] finalSelectionArgs = selectionArgs;
 
         try {
+            final String finalSelection = ProviderSql.selection(selection, selectionArgs);
             // Use DBManager's thread-safe mechanism for write operations
             getDbManager().getDB(true, new DataBaseCallBack() {
                 @Override
@@ -303,10 +310,10 @@ public class FTContentProvider extends ContentProvider {
         }
 
         final int[] resultCount = new int[1];
-        final String finalSelection = selection;
         final String[] finalSelectionArgs = selectionArgs;
 
         try {
+            final String finalSelection = ProviderSql.selection(selection, selectionArgs);
             // Use DBManager's thread-safe mechanism for write operations
             getDbManager().getDB(true, new DataBaseCallBack() {
                 @Override
@@ -332,17 +339,17 @@ public class FTContentProvider extends ContentProvider {
     private Cursor handleStandardQuery(Uri uri, String[] projection, String selection,
                                        String[] selectionArgs, String sortOrder) {
         final String tableName = getTableName(uri);
-        if (tableName == null) {
+        if (tableName == null || !ProviderSql.validProjection(tableName, projection)) {
             return null;
         }
 
         final Cursor[] resultCursor = new Cursor[1];
         final String[] finalProjection = projection;
-        final String finalSelection = selection;
         final String[] finalSelectionArgs = selectionArgs;
-        final String finalSortOrder = sortOrder;
 
         try {
+            final String finalSelection = ProviderSql.selection(selection, selectionArgs);
+            final String finalSortOrder = ProviderSql.order(sortOrder);
             getDbManager().getDB(false, new DataBaseCallBack() {
                 @Override
                 public void run(SQLiteDatabase db) {
@@ -367,15 +374,20 @@ public class FTContentProvider extends ContentProvider {
 
 
     /**
-     * Implement execSQL operations through call method
+     * Dispatch SDK-owned database operations.
      */
     @Override
     public Bundle call(@NonNull String method, @Nullable String arg, @Nullable Bundle extras) {
         switch (method) {
             case METHOD_EXEC_SQL:
-                return handleExecSQL(arg, extras);
             case METHOD_EXEC_SQL_BATCH:
-                return handleExecSQLBatch(arg, extras);
+                Bundle rejected = new Bundle();
+                rejected.putBoolean("success", false);
+                return rejected;
+            case METHOD_UPDATE_AGGREGATE:
+                return updateAggregate(arg, extras);
+            case METHOD_DELETE_OLDEST:
+                return deleteOldest(extras);
             case METHOD_HISTORICAL_RUM_PERSIST:
                 return handleHistoricalRumPersist(extras);
             case METHOD_HISTORICAL_RUM_COMMIT:
@@ -549,130 +561,40 @@ public class FTContentProvider extends ContentProvider {
         return result;
     }
 
-    /**
-     * Handle execSQL calls
-     */
-    private Bundle handleExecSQL(String arg, Bundle extras) {
+    private Bundle updateAggregate(String name, Bundle extras) {
         Bundle result = new Bundle();
-
+        if (name == null || extras == null) return result;
+        String id = extras.getString(FTSQL.RUM_COLUMN_ID);
+        if (id == null) return result;
         try {
-            if (extras != null) {
-                String sql = extras.getString("sql");
-                Parcelable[] bindArgs = extras.getParcelableArray("bind_args");
-
-                if (sql != null && !sql.trim().isEmpty()) {
-                    final String finalSql = sql;
-                    final Parcelable[] finalBindArgs = bindArgs;
-
-                    getDbManager().getDB(true, new DataBaseCallBack() {
-                        @Override
-                        public void run(SQLiteDatabase db) {
-                            try {
-                                if (finalBindArgs != null && finalBindArgs.length > 0) {
-                                    // Convert Parcelable[] to Object[]
-                                    Object[] objectArgs = new Object[finalBindArgs.length];
-                                    for (int i = 0; i < finalBindArgs.length; i++) {
-                                        objectArgs[i] = finalBindArgs[i];
-                                    }
-                                    db.execSQL(finalSql, objectArgs);
-                                } else {
-                                    db.execSQL(finalSql);
-                                }
-                                //LogUtils.d(TAG, "ExecSQL executed successfully: " + finalSql);
-                            } catch (Exception e) {
-                                LogUtils.e(TAG, "ExecSQL failed: " + finalSql + ", error: " + e.getMessage());
-                                throw e;
-                            }
-                        }
-                    });
-
-                    result.putBoolean("success", true);
-                    result.putString("message", "ExecSQL executed successfully");
-                } else {
-                    result.putBoolean("success", false);
-                    result.putString("message", "SQL statement is null or empty");
-                }
-            } else {
-                result.putBoolean("success", false);
-                result.putString("message", "Extras bundle is null");
-            }
-        } catch (Exception e) {
-            result.putBoolean("success", false);
-            result.putString("message", "ExecSQL failed: " + e.getMessage());
-            LogUtils.e(TAG, "ExecSQL operation failed: " + e.getMessage());
+            ProviderSql.AggregateUpdate op = ProviderSql.AggregateUpdate.valueOf(name);
+            if (op.usesTimestamp && !extras.containsKey(FTSQL.RECORD_COLUMN_TM)) return result;
+            Object[] args = op.usesTimestamp
+                    ? new Object[]{extras.getLong(FTSQL.RECORD_COLUMN_TM), id} : new Object[]{id};
+            getDbManager().getDB(true, db -> {
+                db.execSQL(op.sql, args);
+                result.putBoolean("success", true);
+            });
+        } catch (IllegalArgumentException e) {
+            LogUtils.e(TAG, "Unsupported aggregate update");
         }
-
         return result;
     }
 
-    /**
-     * Handle execSQLBatch calls
-     */
-    private Bundle handleExecSQLBatch(String arg, Bundle extras) {
+    private Bundle deleteOldest(Bundle extras) {
         Bundle result = new Bundle();
-
-        try {
-            if (extras != null) {
-                String[] sqlArray = extras.getStringArray("sql_array");
-                Parcelable[] bindArgsArray = extras.getParcelableArray("bind_args_array");
-
-                if (sqlArray != null && sqlArray.length > 0) {
-                    final String[] finalSqlArray = sqlArray;
-                    final Parcelable[] finalBindArgsArray = bindArgsArray;
-
-                    getDbManager().getDB(true, new DataBaseCallBack() {
-                        @Override
-                        public void run(SQLiteDatabase db) {
-                            try {
-                                for (int i = 0; i < finalSqlArray.length; i++) {
-                                    String sql = finalSqlArray[i];
-                                    Object[] bindArgs = null;
-
-                                    // Handle binding parameter arrays
-                                    if (finalBindArgsArray != null && i < finalBindArgsArray.length) {
-                                        // Get corresponding parameter array directly from Bundle
-                                        String key = "bind_args_" + i;
-                                        if (extras.containsKey(key)) {
-                                            Object[] array = extras.getParcelableArray(key);
-                                            if (array != null) {
-                                                bindArgs = array;
-                                            }
-                                        }
-                                    }
-
-                                    if (sql != null && !sql.trim().isEmpty()) {
-                                        if (bindArgs != null && bindArgs.length > 0) {
-                                            db.execSQL(sql, bindArgs);
-                                        } else {
-                                            db.execSQL(sql);
-                                        }
-                                    }
-                                }
-                                //LogUtils.d(TAG, "Batch ExecSQL executed successfully, count: " + finalSqlArray.length);
-                            } catch (Exception e) {
-                                LogUtils.e(TAG, "Batch ExecSQL failed: " + e.getMessage());
-                                throw e;
-                            }
-                        }
-                    });
-
-                    result.putBoolean("success", true);
-                    result.putString("message", "Batch ExecSQL executed successfully");
-                    result.putInt("executed_count", sqlArray.length);
-                } else {
-                    result.putBoolean("success", false);
-                    result.putString("message", "SQL array is null or empty");
-                }
-            } else {
-                result.putBoolean("success", false);
-                result.putString("message", "Extras bundle is null");
-            }
-        } catch (Exception e) {
-            result.putBoolean("success", false);
-            result.putString("message", "Batch ExecSQL failed: " + e.getMessage());
-            LogUtils.e(TAG, "Batch ExecSQL operation failed: " + e.getMessage());
-        }
-
+        if (extras == null || !extras.containsKey("limit")) return result;
+        String[] types = extras.getStringArray(FTSQL.RECORD_COLUMN_DATA_TYPE);
+        if (types == null || types.length == 0) return result;
+        String where = FTSQL.RECORD_COLUMN_ID + " IN (SELECT " + FTSQL.RECORD_COLUMN_ID + " FROM "
+                + FTSQL.FT_SYNC_DATA_FLAT_TABLE_NAME + " WHERE " + ProviderSql.byTypes(types.length)
+                + " ORDER BY " + FTSQL.RECORD_COLUMN_TM + " ASC LIMIT ?)";
+        String[] args = Arrays.copyOf(types, types.length + 1);
+        args[types.length] = String.valueOf(extras.getInt("limit"));
+        getDbManager().getDB(true, db -> {
+            db.delete(FTSQL.FT_SYNC_DATA_FLAT_TABLE_NAME, where, args);
+            result.putBoolean("success", true);
+        });
         return result;
     }
 

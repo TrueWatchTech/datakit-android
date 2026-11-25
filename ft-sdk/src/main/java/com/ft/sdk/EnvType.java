@@ -8,8 +8,7 @@ import java.util.Locale;
 
 /**
  * Data environment, generally used to distinguish and isolate data from different production lines. Data affects the <a href="https://docs.truewatch.com/logs/explorer/">Log Explorer</a> and <a href="https://docs.truewatch.com/real-user-monitoring/android/app-analysis/">Android App Analysis</a> in user access monitoring.
- * The filtering field used is {@link Constants#KEY_ENV } (environment)
- * <p>
+ * The filtering field used is {@link Constants#KEY_ENV } (environment).
  */
 public enum EnvType {
     /**

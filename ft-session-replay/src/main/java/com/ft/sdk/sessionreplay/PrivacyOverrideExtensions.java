@@ -10,10 +10,11 @@ public class PrivacyOverrideExtensions {
     /**
      * Allows setting a view to be "hidden" in the hierarchy in Session Replay.
      * When hidden, the view will be replaced with a placeholder in the replay and
-     * no attempt will be made to record its children.
+     * its children are omitted. Touch collection is configured separately with
+     * {@link #setSessionReplayTouchPrivacy(View, TouchPrivacy)}.
      *
      * @param view The view to modify.
-     * @param hide Pass `true` to hide the view, or `false` to remove the override.
+     * @param hide Pass {@code true} to hide the view, or {@code false} to remove the override.
      */
     public static void setSessionReplayHidden(View view, boolean hide) {
         if (hide) {
@@ -27,7 +28,7 @@ public class PrivacyOverrideExtensions {
      * Allows overriding the image privacy for a view in Session Replay.
      *
      * @param view    The view to modify.
-     * @param privacy The new privacy level to use for the view, or `null` to remove the override.
+     * @param privacy The new privacy level to use for the view, or {@code null} to remove the override.
      */
     public static void setSessionReplayImagePrivacy(View view, ImagePrivacy privacy) {
         if (privacy == null) {
@@ -41,7 +42,7 @@ public class PrivacyOverrideExtensions {
      * Allows overriding the text and input privacy for a view in Session Replay.
      *
      * @param view    The view to modify.
-     * @param privacy The new privacy level to use for the view, or `null` to remove the override.
+     * @param privacy The new privacy level to use for the view, or {@code null} to remove the override.
      */
     public static void setSessionReplayTextAndInputPrivacy(View view, TextAndInputPrivacy privacy) {
         if (privacy == null) {
@@ -55,7 +56,7 @@ public class PrivacyOverrideExtensions {
      * Allows overriding the touch privacy for a view in Session Replay.
      *
      * @param view    The view to modify.
-     * @param privacy The new privacy level to use for the view, or `null` to remove the override.
+     * @param privacy The new privacy level to use for the view, or {@code null} to remove the override.
      */
     public static void setSessionReplayTouchPrivacy(View view, TouchPrivacy privacy) {
         if (privacy == null) {

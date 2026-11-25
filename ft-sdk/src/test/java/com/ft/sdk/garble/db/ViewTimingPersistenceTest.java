@@ -1,6 +1,8 @@
 package com.ft.sdk.garble.db;
 
 import com.ft.sdk.FTApplication;
+import com.ft.sdk.internal.RUMCustomKeys;
+import java.util.Collections;
 import com.ft.sdk.garble.bean.*;
 import com.ft.sdk.garble.db.file.*;
 import org.junit.*;
@@ -48,8 +50,12 @@ public class ViewTimingPersistenceTest {
             active.setCollectType(CollectType.COLLECT_BY_SAMPLE);
             ViewBean view = active.convertToViewBean();
             view.setId("abcdef0123456789abcdef0123456789");
+            RUMCustomKeys.putUserProperties(view.getProperty(), Collections.singletonMap("view_biz", true));
             store.initSumView(view);
             ViewBean restored = store.querySumView(0, true).get(0);
+            assertEquals(Collections.singleton("view_biz"), RUMCustomKeys.parse(
+                    new RUMCustomKeys(restored.getTags(), restored.getProperty()).serialize(
+                            restored.getTags(), restored.getProperty(), Collections.emptySet(), Collections.emptySet())));
             assertNull(restored.networkSettledTime);
             assertNull(restored.interactionToNextViewTime);
             view.networkSettledTime = 0L;
@@ -67,12 +73,16 @@ public class ViewTimingPersistenceTest {
             ActiveActionBean action = new ActiveActionBean("tap", "click", "session",
                     view.getId(), "screen", "parent", true);
             action.setCollectType(CollectType.COLLECT_BY_SAMPLE);
+            RUMCustomKeys.putUserProperties(action.getProperty(), Collections.singletonMap("action_biz", false));
             store.initSumAction(action.convertToActionBean());
             store.increaseActionError(action.getId());
             action.interactionStopTimeNano = action.getStartTimeNanoForDuration() + 100;
             store.updateActionExtraAttr(action.getId(), action.getAttrJsonString());
             store.closeAction(action.getId(), 300, true);
             ActionBean persisted = store.querySumAction(0).get(0);
+            assertEquals(Collections.singleton("action_biz"), RUMCustomKeys.parse(
+                    new RUMCustomKeys(persisted.getTags(), persisted.getProperty()).serialize(
+                            persisted.getTags(), persisted.getProperty(), Collections.emptySet(), Collections.emptySet())));
             assertEquals(action.getInteractionTimeNano(), persisted.getInteractionTimeNano());
             assertEquals(1, persisted.getErrorCount());
             assertEquals(300, persisted.getDuration());

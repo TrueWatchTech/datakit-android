@@ -26,7 +26,7 @@ public class AppStateHistoryTest {
         assertEquals("background", history.between(boundary, clock.now));
     }
 
-    @Test public void coveredUnknownDoesNotMakeAKnownStateMixed() {
+    @Test public void incompleteCoverageStaysUnknownUntilBothStatesAreProven() {
         TestClock clock = new TestClock();
         AppStateHistory history = new AppStateHistory(clock);
         long start = clock.now;
@@ -34,13 +34,28 @@ public class AppStateHistoryTest {
         assertEquals("unknown", history.between(start, clock.now));
         history.record(AppStateHistory.FOREGROUND);
         clock.advance(100);
-        assertEquals("foreground", history.between(start, clock.now));
+        assertEquals("unknown", history.between(start, clock.now));
         history.record(AppStateHistory.BACKGROUND);
         clock.advance(100);
         assertEquals("foreground_and_background", history.between(start, clock.now));
     }
 
-    @Test public void evictionAndInvalidBoundariesReturnUnknown() {
+    @Test public void startBeforeHistoryStillUsesProvenStatesInsideTheInterval() {
+        TestClock clock = new TestClock();
+        AppStateHistory history = new AppStateHistory(clock);
+        long start = clock.now - 100;
+        history.record(AppStateHistory.FOREGROUND);
+        clock.advance(100);
+        assertEquals("unknown", history.between(start, clock.now));
+        long boundary = history.record(AppStateHistory.BACKGROUND);
+        clock.advance(100);
+        assertEquals("unknown", history.between(start, boundary));
+        assertEquals("foreground_and_background", history.between(start, clock.now));
+        assertEquals("unknown", history.between(start, start + 50));
+        assertEquals("unknown", history.at(start));
+    }
+
+    @Test public void evictionKeepsProvenMixedStateAndInvalidBoundariesReturnUnknown() {
         TestClock clock = new TestClock();
         AppStateHistory history = new AppStateHistory(clock);
         long start = history.record(AppStateHistory.FOREGROUND);
@@ -48,7 +63,7 @@ public class AppStateHistoryTest {
             clock.advance(100);
             history.record(i % 2 == 0 ? AppStateHistory.BACKGROUND : AppStateHistory.FOREGROUND);
         }
-        assertEquals("unknown", history.between(start, clock.now));
+        assertEquals("foreground_and_background", history.between(start, clock.now));
         assertEquals("foreground", history.at(clock.now));
         assertEquals("unknown", history.between(0, clock.now));
         assertEquals("unknown", history.between(clock.now, start));

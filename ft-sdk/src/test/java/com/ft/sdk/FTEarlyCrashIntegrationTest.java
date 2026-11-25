@@ -8,6 +8,7 @@ import com.ft.sdk.garble.bean.AppState;
 import com.ft.sdk.garble.threadpool.BaseThreadPool;
 import com.ft.sdk.garble.threadpool.DataUploadThreadPool;
 import com.ft.sdk.garble.threadpool.EventConsumerThreadPool;
+import com.ft.sdk.internal.issue.FTIssueFieldEnricher;
 
 import org.junit.After;
 import org.junit.Before;
@@ -22,11 +23,13 @@ import java.io.PrintWriter;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -108,6 +111,47 @@ public class FTEarlyCrashIntegrationTest {
     }
 
     @Test
+    public void javaCrashKeepsEntryStateWhenStackCollectionChangesLifecycle() throws Exception {
+        Object oldApplication = field(FTApplication.class, "instance").get(null);
+        Object oldActivityManager = field(FTActivityManager.class, "instance").get(null);
+        FTRUMInnerManager rum = FTRUMInnerManager.get();
+        Object oldEnricher = field(FTRUMInnerManager.class, "issueFieldEnricher").get(rum);
+        AtomicReference<FTIssueInfo> captured = new AtomicReference<>();
+        try {
+            field(FTApplication.class, "instance").set(null, RuntimeEnvironment.getApplication());
+            field(FTActivityManager.class, "instance").set(null, null);
+            field(FTRUMInnerManager.class, "issueFieldEnricher").set(rum,
+                    new FTIssueFieldEnricher(issue -> {
+                        captured.set(issue);
+                        return null;
+                    }));
+            FTActivityManager manager = FTActivityManager.get();
+            manager.getAppState();
+            for (AppState expected : new AppState[]{AppState.STARTUP, AppState.RUN, AppState.BACKGROUND}) {
+                field(FTActivityManager.class, "appState").set(manager, expected);
+                captured.set(null);
+                handler.uncaughtException(Thread.currentThread(), new Throwable("state snapshot") {
+                    @Override
+                    public void printStackTrace(PrintWriter writer) {
+                        if (expected == AppState.BACKGROUND) {
+                            manager.appForeground();
+                        } else {
+                            manager.appBackGround();
+                        }
+                        writer.append("test stack");
+                    }
+                });
+                assertEquals(expected.toString(), captured.get().getAppState());
+                assertFalse(captured.get().isHistorical());
+            }
+        } finally {
+            field(FTRUMInnerManager.class, "issueFieldEnricher").set(rum, oldEnricher);
+            field(FTActivityManager.class, "instance").set(null, oldActivityManager);
+            field(FTApplication.class, "instance").set(null, oldApplication);
+        }
+    }
+
+    @Test
     public void javaCrashAfterWindowDoesNotWriteMarker() throws Exception {
         startRun(System.nanoTime() - TimeUnit.SECONDS.toNanos(6));
         assertJavaMarkerAtStackCollection(false);
@@ -142,6 +186,46 @@ public class FTEarlyCrashIntegrationTest {
         handler.uploadNativeCrashBackground(new File("tombstone_anr.dump"), AppState.RUN, false, null);
         assertEquals(2, eventExecutor.getQueue().size());
         assertFalse(hasMarker());
+    }
+
+    @Test
+    public void nativeAnrDoesNotUseDumpOrCallbackStateAsBlockingOnset() throws Exception {
+        assertNativeIssueState(true);
+    }
+
+    @Test
+    public void nativeCrashStillUsesCapturedCrashState() throws Exception {
+        assertNativeIssueState(false);
+    }
+
+    private void assertNativeIssueState(boolean anr) throws Exception {
+        FTRUMInnerManager rum = FTRUMInnerManager.get();
+        Object oldEnricher = field(FTRUMInnerManager.class, "issueFieldEnricher").get(rum);
+        AtomicReference<FTIssueInfo> captured = new AtomicReference<>();
+        File dump = File.createTempFile(anr ? "tombstone_anr" : "tombstone_native", ".dump");
+        config.setEnableTrackAppANR(true);
+        try {
+            field(FTRUMInnerManager.class, "issueFieldEnricher").set(rum,
+                    new FTIssueFieldEnricher(issue -> {
+                        captured.set(issue);
+                        return null;
+                    }));
+            for (boolean historical : new boolean[]{false, true}) {
+                for (AppState state : new AppState[]{AppState.RUN, AppState.BACKGROUND}) {
+                    captured.set(null);
+                    handler.uploadNativeCrashBackground(dump, state, historical, null);
+                    eventExecutor.getQueue().remove().run();
+                    assertEquals(anr ? "unknown" : state.toString(), captured.get().getAppState());
+                    assertEquals(historical, captured.get().isHistorical());
+                    assertEquals(anr ? FTIssueCategory.ANR : FTIssueCategory.CRASH,
+                            captured.get().getCategory());
+                    eventExecutor.getQueue().clear();
+                }
+            }
+        } finally {
+            field(FTRUMInnerManager.class, "issueFieldEnricher").set(rum, oldEnricher);
+            assertTrue(dump.delete());
+        }
     }
 
     @Test
@@ -201,6 +285,72 @@ public class FTEarlyCrashIntegrationTest {
         scheduler.runNext();
         SyncTaskManager.get().executeSyncPoll();
         assertEquals(10000, scheduler.delays.get(1).longValue());
+    }
+
+    @Test
+    public void automaticAndManualSchedulingDoNotWaitForUploadMonitor() throws Exception {
+        seedPreviousCrash();
+        SyncTaskManager manager = SyncTaskManager.get();
+        CountDownLatch uploadLocked = new CountDownLatch(1);
+        CountDownLatch releaseUpload = new CountDownLatch(1);
+        CountDownLatch scheduled = new CountDownLatch(2);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Thread upload = new Thread(() -> {
+            synchronized (manager) {
+                uploadLocked.countDown();
+                try {
+                    if (!releaseUpload.await(5, TimeUnit.SECONDS)) {
+                        failure.compareAndSet(null, new AssertionError("upload lock was not released"));
+                    }
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    failure.compareAndSet(null, error);
+                }
+            }
+        }, "upload-monitor-holder");
+        Thread automatic = new Thread(() -> {
+            try {
+                manager.executeSyncPoll();
+            } catch (Throwable error) {
+                failure.compareAndSet(null, error);
+            } finally {
+                scheduled.countDown();
+            }
+        }, "automatic-schedule-caller");
+        Thread manual = new Thread(() -> {
+            try {
+                manager.executePoll();
+            } catch (Throwable error) {
+                failure.compareAndSet(null, error);
+            } finally {
+                scheduled.countDown();
+            }
+        }, "manual-schedule-caller");
+        upload.start();
+        try {
+            assertTrue("upload must own the monitor", uploadLocked.await(1, TimeUnit.SECONDS));
+            automatic.start();
+            manual.start();
+            assertTrue("scheduling must finish while the upload monitor remains held",
+                    scheduled.await(1, TimeUnit.SECONDS));
+        } finally {
+            releaseUpload.countDown();
+            upload.join(2000);
+            automatic.join(2000);
+            manual.join(2000);
+        }
+        assertFalse(upload.isAlive());
+        assertFalse(automatic.isAlive());
+        assertFalse(manual.isAlive());
+        if (failure.get() != null) throw new AssertionError(failure.get());
+        assertEquals("concurrent triggers must still coalesce", 1, scheduler.delays.size());
+        long firstDelay = scheduler.delays.get(0);
+        assertTrue("whichever trigger wins must retain its first delay", firstDelay == 0 || firstDelay == 2000);
+        scheduler.runNext();
+        assertEquals(0, scheduler.delays.get(1).longValue());
+        scheduler.runNext();
+        manager.executeSyncPoll();
+        assertEquals(10000, scheduler.delays.get(2).longValue());
     }
 
     private void seedPreviousCrash() throws Exception {

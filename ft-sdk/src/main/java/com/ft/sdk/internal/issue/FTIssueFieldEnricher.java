@@ -7,6 +7,7 @@ import com.ft.sdk.FTIssueDataProvider;
 import com.ft.sdk.FTIssueInfo;
 import com.ft.sdk.garble.utils.Constants;
 import com.ft.sdk.garble.utils.LogUtils;
+import com.ft.sdk.internal.RUMCustomKeys;
 
 import java.util.HashMap;
 import java.util.Iterator;
@@ -132,10 +133,12 @@ public final class FTIssueFieldEnricher {
                                       @NonNull Set<String> reservedKeys) {
         for (Map.Entry<String, Object> entry : additionalFields.entrySet()) {
             String key = entry.getKey();
-            if (!sdkTags.containsKey(key)
+            if (!Constants.KEY_RUM_CUSTOM_KEYS.equals(key)
+                    && !sdkTags.containsKey(key)
                     && !sdkFields.containsKey(key)
                     && !reservedKeys.contains(key)) {
                 sdkFields.put(key, entry.getValue());
+                RUMCustomKeys.acceptedField(sdkFields, key);
             }
         }
     }

@@ -154,6 +154,7 @@ final class SessionReplayBridge {
     }
 
     static void appendRumLinkKeys(Map<String, Object> values) {
+        if (values == null) return;
         Object manager = getManagerIfEnabled();
         invoke(manager, "appendSessionReplayRUMLinkKeys", new Class[]{Map.class}, values);
     }

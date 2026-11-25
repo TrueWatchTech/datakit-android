@@ -27,6 +27,10 @@ public class LaunchControlProvider extends ContentProvider {
         FutureTask<Bundle> task = new FutureTask<>(() -> {
             if ("release".equals(method)) {
                 LaunchActivity.releaseFirstDraw();
+            } else if ("recreate".equals(method)) {
+                LaunchActivity.recreateCurrent();
+            } else if ("finish_activity".equals(method)) {
+                LaunchActivity.finishCurrent();
             } else if ("repeat_hook".equals(method)) {
                 FTAutoTrack.startApp((android.app.Application) getContext().getApplicationContext());
                 LaunchApplication.event("repeat_hook");
@@ -40,6 +44,7 @@ public class LaunchControlProvider extends ContentProvider {
             }
             JSONObject report = LaunchAcceptanceProbe.snapshot();
             report.put("events", LaunchApplication.EVENTS);
+            report.put("pre_application_delay_ns", LaunchApplication.preApplicationDelayNs);
             File file = new File(getContext().getFilesDir(), "launch-acceptance.json");
             try (FileOutputStream output = new FileOutputStream(file)) {
                 output.write(report.toString().getBytes(StandardCharsets.UTF_8));

@@ -1,5 +1,7 @@
 package com.ft.sdk.garble.bean;
 
+import com.ft.sdk.internal.RUMCustomKeys;
+
 import java.util.HashMap;
 
 /**
@@ -23,12 +25,24 @@ public class LineProtocolBean {
      * Generation time, unit nanosecond
      */
     final long timeNano;
+    /** Immutable provenance, outside the serialized payload. */
+    private final RUMCustomKeys customKeys;
 
     public LineProtocolBean(String measurement, HashMap<String, Object> tags, HashMap<String, Object> fields, long timeNano) {
+        this(measurement, tags, fields, timeNano, new RUMCustomKeys(tags, fields));
+    }
+
+    public LineProtocolBean(String measurement, HashMap<String, Object> tags, HashMap<String, Object> fields,
+                            long timeNano, RUMCustomKeys customKeys) {
+        this.customKeys = customKeys;
         this.measurement = measurement;
         this.tags = tags;
         this.fields = fields;
         this.timeNano = timeNano;
+    }
+
+    public RUMCustomKeys getCustomKeys() {
+        return customKeys;
     }
 
     public String getMeasurement() {

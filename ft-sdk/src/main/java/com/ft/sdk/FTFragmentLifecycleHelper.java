@@ -6,8 +6,12 @@ import android.os.Build;
 import com.ft.sdk.garble.utils.Constants;
 import com.ft.sdk.garble.utils.PackageUtils;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.WeakHashMap;
 
 /**
  * Fragment lifecycle bridge that unifies AndroidX and platform fragments and
@@ -40,17 +44,21 @@ public class FTFragmentLifecycleHelper implements FragmentLifecycleCallBack {
     }
 
     private FTViewFragmentTrackingHandler viewHandler;
+    private final Set<Activity> registeredActivities = Collections.newSetFromMap(new WeakHashMap<>());
+    private volatile boolean released;
 
     private final Map<Object, long[]> fragmentPreAttachedTimeMap = new HashMap<>();
 
     @Override
     public void onFragmentPreAttached(FragmentWrapper wrapper) {
+        if (released) return;
         fragmentPreAttachedTimeMap.put(wrapper.getRealFragment(), new long[]{System.nanoTime(),
                 com.ft.sdk.garble.utils.Utils.getCurrentNanoTime()});
     }
 
     @Override
     public void onFragmentCreated(FragmentWrapper wrapper) {
+        if (released) return;
         long[] preAttachedStartTime = fragmentPreAttachedTimeMap.remove(wrapper.getRealFragment());
         if (preAttachedStartTime != null) {
             // Calculate Fragment pre-attached to pre-created duration
@@ -68,6 +76,7 @@ public class FTFragmentLifecycleHelper implements FragmentLifecycleCallBack {
 
     @Override
     public void onFragmentResumed(FragmentWrapper wrapper) {
+        if (released) return;
         if (viewHandler != null) {
             HandlerView view = viewHandler.resolveHandlerView(wrapper);
             if (view != null) {
@@ -81,6 +90,7 @@ public class FTFragmentLifecycleHelper implements FragmentLifecycleCallBack {
 
     @Override
     public void onFragmentStopped(FragmentWrapper wrapper) {
+        if (released) return;
         if (viewHandler != null) {
             HandlerView view = viewHandler.resolveHandlerView(wrapper);
             if (view != null) {
@@ -101,7 +111,8 @@ public class FTFragmentLifecycleHelper implements FragmentLifecycleCallBack {
      *
      * @param activity host activity that contains fragments.
      */
-    public void register(Activity activity) {
+    public synchronized void register(Activity activity) {
+        if (released || registeredActivities.contains(activity)) return;
         FTRUMConfigManager manager = FTRUMConfigManager.get();
         if (manager.isRumEnable() && manager.getConfig().isEnableTraceUserViewInFragment()) {
             viewHandler = manager.getConfig().getViewFragmentTrackingHandler();
@@ -111,14 +122,14 @@ public class FTFragmentLifecycleHelper implements FragmentLifecycleCallBack {
                         .setFragmentLifecycleCallBack(this);
                 ((androidx.fragment.app.FragmentActivity) activity).getSupportFragmentManager()
                         .registerFragmentLifecycleCallbacks(androidXFragmentLifecycleCallbacks, true);
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                oreoFragmentLifecycleCallbacks.setFragmentLifecycleCallBack(this);
+                activity.getFragmentManager()
+                        .registerFragmentLifecycleCallbacks(oreoFragmentLifecycleCallbacks, true);
             } else {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    oreoFragmentLifecycleCallbacks
-                            .setFragmentLifecycleCallBack(this);
-                    activity.getFragmentManager()
-                            .registerFragmentLifecycleCallbacks(oreoFragmentLifecycleCallbacks, true);
-                }
+                return;
             }
+            registeredActivities.add(activity);
         }
 
     }
@@ -129,19 +140,21 @@ public class FTFragmentLifecycleHelper implements FragmentLifecycleCallBack {
      *
      * @param activity host activity that contains fragments.
      */
-    public void unregister(Activity activity) {
-        FTRUMConfigManager manager = FTRUMConfigManager.get();
-        if (manager.isRumEnable() && manager.getConfig().isEnableTraceUserViewInFragment()) {
-            if (androidXFragmentLifecycleCallbacks != null &&
-                    activity instanceof androidx.fragment.app.FragmentActivity) {
-                ((androidx.fragment.app.FragmentActivity) activity).getSupportFragmentManager()
-                        .unregisterFragmentLifecycleCallbacks(androidXFragmentLifecycleCallbacks);
-            } else {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    activity.getFragmentManager()
-                            .unregisterFragmentLifecycleCallbacks(oreoFragmentLifecycleCallbacks);
-                }
-            }
+    public synchronized void unregister(Activity activity) {
+        if (!registeredActivities.remove(activity)) return;
+        if (androidXFragmentLifecycleCallbacks != null && activity instanceof androidx.fragment.app.FragmentActivity) {
+            ((androidx.fragment.app.FragmentActivity) activity).getSupportFragmentManager()
+                    .unregisterFragmentLifecycleCallbacks(androidXFragmentLifecycleCallbacks);
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            activity.getFragmentManager().unregisterFragmentLifecycleCallbacks(oreoFragmentLifecycleCallbacks);
+        }
+    }
+
+    synchronized void release() {
+        released = true;
+        fragmentPreAttachedTimeMap.clear();
+        for (Activity activity : new ArrayList<>(registeredActivities)) {
+            unregister(activity);
         }
     }
 }

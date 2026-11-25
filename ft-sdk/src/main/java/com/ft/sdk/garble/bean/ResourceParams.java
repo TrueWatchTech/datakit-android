@@ -4,7 +4,7 @@ import java.util.HashMap;
 import java.util.List;
 
 /**
- * Resource request parameters
+ * HTTP details supplied to {@link com.ft.sdk.FTRUMGlobalManager#addResource(String, ResourceParams, NetStatusBean)}.
  */
 public class ResourceParams {
     /**
@@ -80,11 +80,11 @@ public class ResourceParams {
     @Deprecated
     public long responseContentLength = 0;
     /**
-     * HTTP request
+     * HTTP method, for example {@code GET} or {@code POST}.
      */
     public String resourceMethod = "";
     /**
-     * HTTP request body
+     * HTTP response body text, used as error details for unsuccessful responses.
      */
     public String responseBody = "";
 

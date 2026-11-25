@@ -1,6 +1,9 @@
 package com.ft.sdk.internal.anr.historical;
 
 import com.ft.sdk.garble.bean.CollectType;
+import com.ft.sdk.internal.RUMCustomKeys;
+import com.ft.sdk.internal.issue.FTIssueFieldEnricher;
+import java.util.Collections;
 import com.ft.sdk.garble.db.InsertResult;
 import com.ft.sdk.garble.utils.Constants;
 
@@ -13,6 +16,25 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class HistoricalAnrReporterTest {
+
+    @Test
+    public void exitImportanceCannotDetermineBlockingOnsetState() {
+        int[] importance = {100, 200, 125, 230, 300, 325, 350, 400, 0, 1000, -1, 999};
+        HistoricalRumContext context = new HistoricalRumContext(
+                "com.example.app", "run", 1_000, "session", "view", "Home",
+                10_000_000_000L, 0, false);
+        for (int i = 0; i < importance.length; i++) {
+            RecordingSink sink = new RecordingSink();
+            DefaultHistoricalAnrReporter reporter = new DefaultHistoricalAnrReporter(sink,
+                    (stack, time, state, tags, fields) -> assertEquals("unknown", state.toString()));
+            reporter.report(new ProcessExitRecord("com.example.app", 123, 20_000,
+                    ProcessExitRecord.REASON_ANR, importance[i], null), context, "blocked", "dedupe");
+            assertEquals("importance=" + importance[i], "unknown",
+                    sink.tags.get(Constants.KEY_RUM_ERROR_SITUATION));
+            assertFalse(sink.fields.containsKey(Constants.KEY_RUM_APP_STATE));
+            assertFalse(sink.tags.containsKey(Constants.KEY_RUM_APP_STATE));
+        }
+    }
 
     @Test
     public void reportUsesOnlyPersistedHistoricalRumContext() {
@@ -95,8 +117,10 @@ public class HistoricalAnrReporterTest {
                         called[0] = true;
                         assertEquals("blocked", stack);
                         assertEquals(20_000_000_000L, occurredAtNs);
-                        assertEquals("run", state.toString());
-                        fields.put("provider_field", "historical-anr");
+                        assertEquals("unknown", state.toString());
+                        new FTIssueFieldEnricher(null).mergeAdditionalFields(
+                                Collections.singletonMap("provider_field", "historical-anr"),
+                                tags, fields, Collections.emptySet());
                     }
                 });
         ProcessExitRecord exit = new ProcessExitRecord(
@@ -111,6 +135,9 @@ public class HistoricalAnrReporterTest {
 
         assertTrue(called[0]);
         assertEquals("historical-anr", sink.fields.get("provider_field"));
+        assertEquals(Collections.singleton("provider_field"), RUMCustomKeys.parse(
+                new RUMCustomKeys(sink.tags, sink.fields).serialize(
+                        sink.tags, sink.fields, Collections.emptySet(), Collections.emptySet())));
     }
 
     @Test

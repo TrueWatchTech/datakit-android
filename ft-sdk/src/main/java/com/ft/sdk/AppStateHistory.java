@@ -61,23 +61,27 @@ final class AppStateHistory {
     /** Intervals are [start, end); zero duration is a point query. */
     synchronized String between(long start, long end) {
         long now = observeClock();
-        if (incomparable || start <= 0 || end < start || end > now + CLOCK_TOLERANCE
-                || start < entries.peekFirst().time) return UNKNOWN;
+        if (incomparable || start <= 0 || end < start || end > now + CLOCK_TOLERANCE) return UNKNOWN;
+        // A missing prefix prevents proving an all-foreground/all-background interval,
+        // but must not hide both states already observed within the requested interval.
         String state = UNKNOWN;
         boolean foreground = false;
         boolean background = false;
+        boolean unknown = false;
         for (Entry entry : entries) {
             if (entry.time <= start) {
                 state = entry.state;
             } else if (entry.time < end) {
+                unknown |= UNKNOWN.equals(state);
                 foreground |= FOREGROUND.equals(state);
                 background |= BACKGROUND.equals(state);
                 state = entry.state;
             } else break;
         }
+        unknown |= UNKNOWN.equals(state);
         foreground |= FOREGROUND.equals(state);
         background |= BACKGROUND.equals(state);
-        return foreground && background ? MIXED : foreground ? FOREGROUND
+        return foreground && background ? MIXED : unknown ? UNKNOWN : foreground ? FOREGROUND
                 : background ? BACKGROUND : UNKNOWN;
     }
 

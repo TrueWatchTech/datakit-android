@@ -6,25 +6,27 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
+import android.view.View;
 
 import androidx.annotation.NonNull;
 
 import com.ft.sdk.garble.utils.AopUtils;
-import com.ft.sdk.garble.utils.Constants;
-import com.ft.sdk.garble.utils.LogUtils;
+import com.ft.sdk.garble.utils.FirstDrawDoneListener;
 import com.ft.sdk.garble.utils.Utils;
 
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 
 /**
  * create: by huangDianHua
  * time: 2020/6/17 17:50:45
- * description: Handle current application going to background
- * for 10 seconds and then returning to foreground
+ * description: Separate Activity creation on a background return from reuse of an existing Activity.
  */
 class LifeCircleTraceCallback {
-    private static final String TAG = Constants.LOG_TAG_PREFIX + "LifeCircleTraceCallback";
+    private static final long WARM_START_CANDIDATE_TIMEOUT_NS = TimeUnit.SECONDS.toNanos(60);
     /**
      * Message channel
      */
@@ -47,11 +49,30 @@ class LifeCircleTraceCallback {
     private long startTimeNanoTime = 0;
 
     private long startClockTimeNano = 0;
+    private boolean hotResumePending;
 
     /**
      * Cache creation time point
      */
     private final LinkedHashMap<Context, long[]> mCreateMap = new LinkedHashMap<>();
+    private final Map<Context, LaunchActivityState> launchActivities = new IdentityHashMap<>();
+    private final Map<Context, Boolean> warmCandidateActivities = new IdentityHashMap<>();
+    private final Map<Activity, FirstDrawDoneListener> warmDrawListeners = new IdentityHashMap<>();
+    private boolean backgroundSinceResume;
+    private boolean warmInterruptedByBackground;
+    private long warmStartClockTimeNano;
+    private long warmStartTimeNano;
+
+    private static final class LaunchActivityState {
+        final long createdNanoTime;
+        final long createdTime;
+        boolean resumed;
+
+        LaunchActivityState(long createdNanoTime, long createdTime) {
+            this.createdNanoTime = createdNanoTime;
+            this.createdTime = createdTime;
+        }
+    }
 
     /**
      * Used to send delayed messages, execute sleep {@link #alreadySleep} = true operation after 10 seconds
@@ -66,13 +87,66 @@ class LifeCircleTraceCallback {
         }
     };
 
+    void release() {
+        handler.removeCallbacksAndMessages(null);
+        for (Context context : mCreateMap.keySet()) {
+            if (context instanceof Activity) FTAppStartCounter.get().cancelFirstFrame((Activity) context);
+        }
+        mCreateMap.clear();
+        launchActivities.clear();
+        clearWarmStart();
+        hotResumePending = false;
+    }
+
+    void onForegroundRestored(java.util.List<Activity> startedActivities,
+                              java.util.List<Activity> resumedActivities) {
+        long now = System.nanoTime();
+        long time = Utils.getCurrentNanoTime();
+        if (startedActivities != null) {
+            for (Activity activity : startedActivities) {
+                if (activity != null && !launchActivities.containsKey(activity)) {
+                    LaunchActivityState state = new LaunchActivityState(now, time);
+                    state.resumed = true;
+                    launchActivities.put(activity, state);
+                }
+            }
+        }
+        if (resumedActivities != null) {
+            for (Activity activity : resumedActivities) {
+                if (activity != null) {
+                    LaunchActivityState state = launchActivities.get(activity);
+                    if (state == null) {
+                        state = new LaunchActivityState(now, time);
+                        launchActivities.put(activity, state);
+                    }
+                    state.resumed = true;
+                }
+            }
+        }
+        mInited = true;
+        alreadySleep = false;
+        backgroundSinceResume = false;
+        hotResumePending = false;
+    }
+
     /**
      * Before {@link Activity#onStart()}
      */
     public void onPreStart() {
+        onPreStart(null);
+    }
+
+    public void onPreStart(Activity activity) {
+        expireWarmStartIfNeeded();
+        if (activity != null) {
+            clearStaleWarmStartForExistingActivity(activity);
+        }
+        hotResumePending = false;
         if (alreadySleep) {// Indicates returning from background
-            if (mInited) {
+            if (mInited && FTAppStartCounter.get().hasCompletedFirstDraw()
+                    && warmStartClockTimeNano == 0) {
                 //hot start
+                hotResumePending = true;
                 startTimeNanoTime = Utils.getCurrentNanoTime();
                 startClockTimeNano = System.nanoTime();
             }
@@ -87,13 +161,58 @@ class LifeCircleTraceCallback {
      * @param context
      */
     public void onPreOnCreate(Context context) {
-        mCreateMap.put(context, new long[]{System.nanoTime(), Utils.getCurrentNanoTime()});
-        FTAppStartCounter.get().checkFirstActivityPreCreate(System.nanoTime());
+        long now = System.nanoTime();
+        long time = Utils.getCurrentNanoTime();
+        mCreateMap.put(context, new long[]{now, time});
+        recordLaunchActivity(context, now, time);
+        FTAppStartCounter.get().checkFirstActivityPreCreate(now);
         if (!mInited) {
 //            FTAutoTrack.startApp();
             // warn start
             startTimeNanoTime = Utils.getCurrentNanoTime();
             startClockTimeNano = System.nanoTime();
+        }
+    }
+
+    void onLegacyCreated(Activity activity) {
+        // Track ownership without inventing an onCreate entry timestamp.
+        mCreateMap.put(activity, new long[]{0, 0});
+        recordLaunchActivity(activity, System.nanoTime(), Utils.getCurrentNanoTime());
+        FTAppStartCounter.get().onLegacyActivityCreated();
+    }
+
+    private void recordLaunchActivity(Context context, long now, long time) {
+        launchActivities.put(context, new LaunchActivityState(now, time));
+        maybeStartWarm(context);
+    }
+
+    private void maybeStartWarm(Context context) {
+        expireWarmStartIfNeeded();
+        if (!backgroundSinceResume || !FTAppStartCounter.get().hasCompletedFirstDraw()) return;
+        clearStaleWarmStartForExistingActivity(context);
+        LaunchActivityState state = launchActivities.get(context);
+        if (state == null || state.resumed) return;
+        warmCandidateActivities.put(context, Boolean.TRUE);
+        if (warmStartClockTimeNano == 0) {
+            warmStartClockTimeNano = state.createdNanoTime;
+            warmStartTimeNano = state.createdTime;
+            warmInterruptedByBackground = false;
+        }
+    }
+
+    private void expireWarmStartIfNeeded() {
+        if (warmStartClockTimeNano > 0
+                && System.nanoTime() - warmStartClockTimeNano > WARM_START_CANDIDATE_TIMEOUT_NS) {
+            clearWarmStart();
+        }
+    }
+
+    private void clearStaleWarmStartForExistingActivity(Context context) {
+        if (warmStartClockTimeNano == 0 || !warmInterruptedByBackground) return;
+        if (warmCandidateActivities.containsKey(context)) return;
+        LaunchActivityState state = launchActivities.get(context);
+        if (state != null && state.resumed) {
+            clearWarmStart();
         }
     }
 
@@ -145,23 +264,14 @@ class LifeCircleTraceCallback {
         FTRUMConfigManager manager = FTRUMConfigManager.get();
         FTRUMConfig config = manager.getConfig();
 
-        FTAppStartCounter.get().checkFirstFrameStart(activity, new Runnable() {
-            @Override
-            public void run() {
-                FTAppStartCounter.get().coldStart(System.nanoTime());
-                // RUM may have been initialized after this Activity resumed.
-                FTRUMConfigManager currentManager = FTRUMConfigManager.get();
-                if (currentManager.isRumEnable()
-                        && currentManager.getConfig().isEnableTraceUserAction()) {
-                    FTAppStartCounter.get().coldStartUpload();
-                }
-            }
-        });
+        maybeStartWarm(activity);
+        registerFirstFrame(activity);
 
         // Already sleeping
         if (alreadySleep) {
             if (mInited) {
-                if (config.isRumEnable() && config.isEnableTraceUserAction()) {
+                if (hotResumePending && warmStartClockTimeNano == 0
+                        && config.isRumEnable() && config.isEnableTraceUserAction()) {
                     if (startTimeNanoTime > 0) {
                         long now = System.nanoTime();
                         FTAppStartCounter.get().hotStart(now - startClockTimeNano,
@@ -178,9 +288,68 @@ class LifeCircleTraceCallback {
         if (!mInited) {
             mInited = true;
         }
+        LaunchActivityState state = launchActivities.get(activity);
+        if (state != null) state.resumed = true;
+        backgroundSinceResume = false;
+        hotResumePending = false;
+    }
+
+    void registerFirstFrame(Activity activity) {
+        expireWarmStartIfNeeded();
+        clearStaleWarmStartForExistingActivity(activity);
+        if (warmStartClockTimeNano > 0) {
+            registerWarmFirstFrame(activity);
+            return;
+        }
+        FTAppStartCounter.get().checkFirstFrameStart(activity, new Runnable() {
+            @Override
+            public void run() {
+                FTAppStartCounter.get().coldStart(System.nanoTime());
+                // RUM may have been initialized after this Activity resumed.
+                FTRUMConfigManager currentManager = FTRUMConfigManager.get();
+                if (currentManager.isRumEnable()
+                        && currentManager.getConfig().isEnableTraceUserAction()) {
+                    FTAppStartCounter.get().coldStartUpload();
+                }
+            }
+        });
+
+    }
+
+    private void registerWarmFirstFrame(Activity activity) {
+        if (warmDrawListeners.containsKey(activity)) return;
+        View root = activity.findViewById(android.R.id.content);
+        if (root == null) return;
+        long origin = warmStartClockTimeNano;
+        warmDrawListeners.put(activity, FirstDrawDoneListener.registerForNextDrawCancellable(root, () -> {
+            if (origin != warmStartClockTimeNano) return;
+            long duration = System.nanoTime() - origin;
+            long startTime = warmStartTimeNano;
+            clearWarmStart();
+            FTRUMConfig config = FTRUMConfigManager.get().getConfig();
+            if (config.isRumEnable() && config.isEnableTraceUserAction()) {
+                FTAppStartCounter.get().warmStart(duration, startTime);
+            }
+        }));
+    }
+
+    void cancelFirstFrame(Activity activity) {
+        FTAppStartCounter.get().cancelFirstFrame(activity);
+        FirstDrawDoneListener listener = warmDrawListeners.remove(activity);
+        if (listener != null) listener.cancel();
+    }
+
+    private void clearWarmStart() {
+        warmStartClockTimeNano = 0;
+        warmStartTimeNano = 0;
+        warmInterruptedByBackground = false;
+        warmCandidateActivities.clear();
+        for (FirstDrawDoneListener listener : warmDrawListeners.values()) listener.cancel();
+        warmDrawListeners.clear();
     }
 
     public void onPreResume(Activity activity) {
+        maybeStartWarm(activity);
         FTActivityManager.get().setCurrentActivity(activity);
     }
 
@@ -188,6 +357,14 @@ class LifeCircleTraceCallback {
      * Triggered when all Activities are onStop
      */
     public void onEnterBackground() {
+        backgroundSinceResume = true;
+        if (warmStartClockTimeNano > 0) {
+            if (warmCandidateActivities.isEmpty()) {
+                clearWarmStart();
+            } else {
+                warmInterruptedByBackground = true;
+            }
+        }
         if (FTSdk.checkInstallState()) {
             handler.removeMessages(MSG_CHECK_SLEEP_STATUS);
             // Execute after sleeping for a while to distinguish short-term wake-up behaviors
@@ -202,12 +379,13 @@ class LifeCircleTraceCallback {
      */
     public void onPostDestroy(Context context) {
         if (context instanceof Activity) {
-            FTAppStartCounter.get().cancelFirstFrame((Activity) context);
+            cancelFirstFrame((Activity) context);
         }
         mCreateMap.remove(context);
-        if (mCreateMap.isEmpty()) {
-            mInited = false;
-            LogUtils.d(TAG, "Application all close");
+        launchActivities.remove(context);
+        warmCandidateActivities.remove(context);
+        if (warmStartClockTimeNano > 0 && warmInterruptedByBackground && warmCandidateActivities.isEmpty()) {
+            clearWarmStart();
         }
     }
 

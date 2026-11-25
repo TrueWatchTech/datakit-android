@@ -7,6 +7,9 @@ import java.util.HashMap;
 import java.util.List;
 
 /**
+ * Configures trace sampling, HTTP propagation and correlation with RUM resources.
+ * Pass to {@link FTSdk#initTraceWithConfig(FTTraceConfig)} after installation.
+ *
  * @author Brandon
  */
 public class FTTraceConfig {
@@ -139,7 +142,7 @@ public class FTTraceConfig {
     }
 
     /**
-     * <a href="https://docs.truewatch.com/real-user-monitoring/explorer/resource/">Explorer Resource</a> function, used to trace the Trace chain of problematic Resource data
+     * Selects the HTTP header format used to propagate trace context. Defaults to {@link TraceType#DDTRACE}.
      *
      * @param traceType trace header propagation type
      * @return this config for chaining

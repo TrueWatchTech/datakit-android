@@ -8,6 +8,9 @@
             android:theme="@android:style/Theme.Material.Light.NoActionBar" />
         <activity android:name="com.ft.sdk.MonitorLifecycleTestActivity"
             android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+        <activity android:name="com.ft.sdk.SyncPollResumeTestActivity"
+            android:launchMode="singleTask"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
     </application>
 
 </manifest>

@@ -20,11 +20,6 @@ import java.io.StringWriter;
  */
 public class LogUtils {
 
-    /**
-     * Default cache file name
-     */
-    private final static String DEFAULT_INNER_LOG_FILE = "LogInner.log";
-
     protected static String TAG = "[FT-SDK]:";
 
     /**
@@ -173,8 +168,10 @@ public class LogUtils {
      * @param isAndroidTest Whether it is Android Test
      */
     private static void registerInnerLogCacheToFile(File file, boolean isAndroidTest) {
-        final LogFileHelper helper = new LogFileHelper(FTApplication.getApplication(), file, isAndroidTest);
+        registerFileHandler(new LogFileHelper(FTApplication.getApplication(), file, isAndroidTest));
+    }
 
+    private static void registerFileHandler(final LogFileHelper helper) {
         TrackLog.setInnerLogHandler(new FTInnerLogHandler() {
             @Override
             public void printInnerLog(String level, String tag, String logContent) {
@@ -202,7 +199,7 @@ public class LogUtils {
 
     /**
      * Convert internal log to file
-     * Default path: /data/data/{package_name}/files/LogInner.log
+     * Default path under the application cache directory: ft_sdk/logs/LogInner.log
      * <p>
      * Need to enable {@link com.ft.sdk.FTSDKConfig#setDebug(boolean)} Set to true to enable debug mode
      * <p>
@@ -212,8 +209,10 @@ public class LogUtils {
      * {@link FTLogger}, if using FTLogger avoid using {@link  com.ft.sdk.garble.bean.Status#OK}
      */
     public static void registerInnerLogCacheToFile() {
-        String filePath = FTApplication.getApplication().getFilesDir().toString() + File.separator + DEFAULT_INNER_LOG_FILE;
-        registerInnerLogCacheToFile(new File(filePath));
+        File cacheDir = FTApplication.getApplication().getCacheDir();
+        if (cacheDir != null) {
+            registerFileHandler(LogFileHelper.forDefaultLog(cacheDir, false));
+        }
     }
 
 

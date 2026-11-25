@@ -7,9 +7,11 @@ import androidx.annotation.Nullable;
 
 import com.ft.sdk.garble.utils.Constants;
 import com.ft.sdk.garble.utils.Utils;
+import com.ft.sdk.internal.RUMCustomKeys;
 
 import java.util.HashMap;
 
+/** Configures RUM for an application. Pass to {@link FTSdk#initRUMWithConfig(FTRUMConfig)} after installation. */
 public class FTRUMConfig {
     /**
      * Sampling rate, [0,1], scope is all View, Action, LongTask, Error data under the same session_id
@@ -125,6 +127,11 @@ public class FTRUMConfig {
      * Set global tag
      */
     private final HashMap<String, Object> globalContext = new HashMap<>();
+    java.util.Set<String> userGlobalContextKeys;
+
+    void captureUserGlobalContextKeys() {
+        userGlobalContextKeys = RUMCustomKeys.userKeys(globalContext);
+    }
 
 
     /**
@@ -373,7 +380,8 @@ public class FTRUMConfig {
     }
 
     /**
-     * Set log discard strategy
+     * Selects which RUM events to discard at the row-count limit. Defaults to {@link RUMCacheDiscard#DISCARD}.
+     * In total cache-size mode the SDK uses {@link FTSDKConfig#setCacheDiscard(CacheDiscard)} instead.
      *
      * @param rumCacheDiscardStrategy strategy used when the RUM cache limit is reached
      * @return this config for chaining
@@ -698,6 +706,7 @@ public class FTRUMConfig {
         return this;
     }
 
+    /** Returns whether instrumented URLConnection requests are eligible for automatic Resource collection. */
     public boolean isEnableHttpURLConnectionResource() {
         return enableHttpURLConnectionResource;
     }
@@ -764,7 +773,11 @@ public class FTRUMConfig {
     /**
      * Setting a non-null configuration enables visitor headers; null (the default) disables them.
      * Independent of RUM/Trace sampling and Resource collection.
-     * Configuration is captured during initRUMWithConfig; subsequent mutations do not apply.
+     * The SDK validates and copies the rules at {@link FTSdk#initRUMWithConfig(FTRUMConfig)}.
+     * An invalid header, lifetime or matcher list disables Visitor ID injection.
+     *
+     * @param config visitor header and URL rules, or null to disable injection
+     * @return this config for chaining
      */
     public FTRUMConfig setVisitorIdConfig(FTVisitorIdConfig config) {
         visitorIdConfig = config;

@@ -33,6 +33,7 @@ import com.ft.sdk.internal.anr.historical.FileHistoricalRumContextStore;
 import com.ft.sdk.internal.anr.historical.ProcessRunIdentity;
 import com.ft.sdk.internal.issue.FTIssueFieldEnricher;
 import com.ft.sdk.internal.metrics.InteractionToNextViewMetric;
+import com.ft.sdk.internal.RUMCustomKeys;
 
 import org.json.JSONException;
 
@@ -260,7 +261,7 @@ public class FTRUMInnerManager {
 
                         String viewName = viewBean.getViewName();
                         String viewReferrer = viewBean.getViewReferrer();
-                        HashMap<String, Object> property = viewBean.getProperty();
+                        HashMap<String, Object> property = RUMCustomKeys.copy(viewBean.getProperty());
                         long loadTime = -1;
 
                         viewBean = newSessionView(viewName, viewReferrer, loadTime);
@@ -403,9 +404,14 @@ public class FTRUMInnerManager {
     }
 
     private RUMViewContext resolveRUMViewContext(AppState state) {
+        return resolveRUMViewContext(state, false);
+    }
+
+    private RUMViewContext resolveRUMViewContext(AppState state, boolean preferActiveView) {
         AppState currentState = state == null ? FTActivityManager.get().getAppState() : state;
         ActiveViewBean viewBean = activeView;
-        if (currentState != AppState.BACKGROUND && viewBean != null && !viewBean.isClose()) {
+        if ((preferActiveView || currentState != AppState.BACKGROUND)
+                && viewBean != null && !viewBean.isClose()) {
             return RUMViewContext.fromView(viewBean);
         }
 
@@ -475,6 +481,7 @@ public class FTRUMInnerManager {
 
     private boolean isLaunchActionType(String actionType) {
         return Constants.ACTION_TYPE_LAUNCH_COLD.equals(actionType)
+                || Constants.ACTION_TYPE_LAUNCH_WARM.equals(actionType)
                 || Constants.ACTION_TYPE_LAUNCH_HOT.equals(actionType);
     }
 
@@ -551,9 +558,10 @@ public class FTRUMInnerManager {
         activeAction.setStartTimeNanoForDuration(interactionTime);
         activeAction.setHasReplay(viewContext.hasReplay);
         if (property != null) {
-            activeAction.getProperty().putAll(property);
+            RUMCustomKeys.putUserProperties(activeAction.getProperty(), property);
         }
         activeAction.setCollectType(checkSessionWillCollect(activeAction.getSessionId()));
+        activeAction.frozenAppState = appStateHistory().during(startTime, duration);
         initAction(activeAction, true);
         if (isLaunchActionType(actionType)) {
             closeLaunchViewIfForegroundViewIsActive(duration);
@@ -614,7 +622,7 @@ public class FTRUMInnerManager {
             activeAction = actionBean;
             actionBean.setHasReplay(viewContext.hasReplay);
             if (property != null) {
-                actionBean.getProperty().putAll(property);
+                RUMCustomKeys.putUserProperties(actionBean.getProperty(), property);
             }
             actionBean.setTags(FTRUMConfigManager.get().getRUMPublicDynamicTags());
             actionBean.setCollectType(checkSessionWillCollect(actionBean.getSessionId()));
@@ -705,7 +713,7 @@ public class FTRUMInnerManager {
         ResourceBean bean = onCreateResource(resourceId);
         LogUtils.d(TAG, "startResource:" + resourceId);
         if (property != null) {
-            bean.property.putAll(property);
+            RUMCustomKeys.putUserProperties(bean.property, property);
         }
         NetworkStateBean networkState = FTNetworkListener.get().getNetworkStateBean();
         bean.networkAvailable = networkState.isNetworkAvailable();
@@ -769,7 +777,7 @@ public class FTRUMInnerManager {
         ResourceBean bean = resourceBeanMap.get(resourceId);
         if (bean != null) {
             if (property != null) {
-                bean.property.putAll(property);
+                RUMCustomKeys.putUserProperties(bean.property, property);
             }
             final String actionId = bean.actionId;
             final String viewId = bean.viewId;
@@ -1004,7 +1012,7 @@ public class FTRUMInnerManager {
         }
         checkActionClose();
         if (property != null) {
-            activeViewBean.getProperty().putAll(property);
+            RUMCustomKeys.putUserProperties(activeViewBean.getProperty(), property);
         }
         FTMonitorManager.get().attachMonitorData(activeViewBean);
         activeViewBean.setTags(FTRUMConfigManager.get().getRUMPublicDynamicTags());
@@ -1071,7 +1079,7 @@ public class FTRUMInnerManager {
             newView.setProcessStartMs(processIdentity.getProcessStartMs());
         }
         if (property != null) {
-            newView.getProperty().putAll(property);
+            RUMCustomKeys.putUserProperties(newView.getProperty(), property);
         }
         newView.setTags(FTRUMConfigManager.get().getRUMPublicDynamicTags());
         newView.setCollectType(checkSessionWillCollect(newView.getSessionId()));
@@ -1209,7 +1217,7 @@ public class FTRUMInnerManager {
     public void addError(String log, String message, long dateline, String errorType,
                          AppState state, HashMap<String, Object> property, RunnerCompleteCallBack callBack) {
         addErrorInternal(log, message, dateline, errorType, state, property, callBack,
-                new HashMap<String, Object>());
+                new HashMap<String, Object>(), false);
     }
 
     /**
@@ -1225,6 +1233,20 @@ public class FTRUMInnerManager {
                            String threadName,
                            HashMap<String, Object> property,
                            RunnerCompleteCallBack callBack) {
+        boolean watchdogAnr = !historical && category == FTIssueCategory.ANR
+                && ErrorType.ANR_ERROR.toString().equals(errorType);
+        if (watchdogAnr) {
+            ActiveViewBean view = activeView;
+            // Foreground recovery cannot make a background-origin probe eligible.
+            // Synthetic fallback Views do not constitute an active page receiving the Error.
+            if (state == AppState.BACKGROUND || ((view == null || view.isClose())
+                    && FTActivityManager.get().getAppState() == AppState.BACKGROUND)) {
+                if (callBack != null) {
+                    callBack.onComplete();
+                }
+                return;
+            }
+        }
         FTIssueInfo issue = new FTIssueInfo(
                 category,
                 errorType,
@@ -1237,7 +1259,7 @@ public class FTRUMInnerManager {
         HashMap<String, Object> additionalFields =
                 issueFieldEnricher.provideAdditionalFields(issue);
         addErrorInternal(log, message, dateline, errorType, state, property, callBack,
-                additionalFields);
+                additionalFields, watchdogAnr);
     }
 
     /**
@@ -1277,7 +1299,8 @@ public class FTRUMInnerManager {
                                   AppState state,
                                   HashMap<String, Object> property,
                                   RunnerCompleteCallBack callBack,
-                                  final HashMap<String, Object> additionalFields) {
+                                  final HashMap<String, Object> additionalFields,
+                                  boolean watchdogAnr) {
 
         try {
             boolean isPreCrash = property != null
@@ -1299,13 +1322,13 @@ public class FTRUMInnerManager {
                 }
             }
             final HashMap<String, Object> tags = FTRUMConfigManager.get().getRUMPublicDynamicTags();
-            final HashMap<String, Object> fields = new HashMap<>();
+            final HashMap<String, Object> fields = RUMCustomKeys.newMap();
             tags.put(Constants.KEY_RUM_ERROR_TYPE, errorType);
             tags.put(Constants.KEY_RUM_ERROR_SOURCE, ErrorSource.LOGGER.toString());
             tags.put(Constants.KEY_RUM_ERROR_SITUATION, state.toString());
 
             if (property != null) {
-                fields.putAll(property);
+                RUMCustomKeys.putUserProperties(fields, property);
             }
 
             fields.put(Constants.KEY_RUM_ERROR_MESSAGE, message);
@@ -1316,7 +1339,8 @@ public class FTRUMInnerManager {
                 fields.put(Constants.KEY_RUM_FOREGROUND_CRASH_FREE_DURATION, crashFreeDuration.foregroundDuration);
                 fields.put(Constants.KEY_RUM_BACKGROUND_CRASH_FREE_DURATION, crashFreeDuration.backgroundDuration);
             }
-            attachRUMRelative(tags, fields, true, state);
+            // Accepted watchdog events use current View routing and retain their onset situation.
+            attachRUMRelative(tags, fields, true, watchdogAnr ? null : state, watchdogAnr);
             final String issueViewId = HashMapUtils.getString(
                     tags, Constants.KEY_RUM_VIEW_ID);
 
@@ -1349,8 +1373,8 @@ public class FTRUMInnerManager {
                                 new RunnerCompleteCallBack() {
                                     @Override
                                     public void onComplete() {
-                                        if (isCrashError) {
-                                            FTActivityManager.get().resetCrashFreeDuration(dateline, state);
+                                        if (isCrashError && !isPreCrash) {
+                                            FTActivityManager.get().resetCrashFreeDuration(dateline);
                                         }
                                         increaseError(tags);
                                         if (callBack != null) {
@@ -1395,12 +1419,12 @@ public class FTRUMInnerManager {
             checkSessionRefresh(true);
             CollectType type = checkSessionWillCollect(sessionId);
             HashMap<String, Object> tags = FTRUMConfigManager.get().getRUMPublicDynamicTags();
-            HashMap<String, Object> fields = new HashMap<>();
+            HashMap<String, Object> fields = RUMCustomKeys.newMap();
             fields.put(Constants.KEY_RUM_LONG_TASK_DURATION, duration);
             fields.put(Constants.KEY_RUM_LONG_TASK_STACK, log);
 
             if (property != null) {
-                fields.putAll(property);
+                RUMCustomKeys.putUserProperties(fields, property);
             }
 
             attachRUMRelative(tags, fields, true);
@@ -1482,6 +1506,8 @@ public class FTRUMInnerManager {
         bean.resourceRequestBodySize = netStatusBean.requestBodySize;
         bean.resourceConnectionReuse = netStatusBean.connectionReuse;
         bean.resourceConnectionReuseKnown = netStatusBean.connectionReuseKnown;
+        bean.frozenAppState = appStateHistory().during(bean.appStateStartTime, bean.resourceLoad);
+        bean.errorAppState = appStateHistory().at(EventAppState.end(bean.appStateStartTime, bean.resourceLoad));
         bean.netStateSet = true;
         checkToAddResource(resourceId, bean);
     }
@@ -1536,10 +1562,10 @@ public class FTRUMInnerManager {
             tags.put(Constants.KEY_RUM_VIEW_REFERRER, viewReferrer);
             tags.put(Constants.KEY_RUM_SESSION_ID, sessionId);
 
-            HashMap<String, Object> fields = new HashMap<>(bean.property);
+            HashMap<String, Object> fields = RUMCustomKeys.copy(bean.property);
             fields.put(Constants.KEY_RUM_SESSION_START_REASON, bean.sessionStartReason);
             fields.put(Constants.KEY_RUM_APP_STATE,
-                    appStateHistory().during(bean.appStateStartTime, bean.resourceLoad));
+                    bean.frozenAppState);
 
             tags.put(Constants.KEY_RUM_RESOURCE_URL_HOST, bean.urlHost);
 
@@ -1673,7 +1699,8 @@ public class FTRUMInnerManager {
                     Constants.FT_MEASUREMENT_RUM_RESOURCE, tags, fields, timingCallback, collectType, bean.visitorId);
             unscheduledWrites--;
 
-            long time = Utils.getCurrentNanoTime();
+            long time = EventAppState.end(bean.appStateStartTime, bean.resourceLoad);
+            if (time <= 0) time = bean.startTime;
 
             if (networkError) {
                 SyncTaskManager.get().setErrorTimeLine(time, activeView);
@@ -1683,7 +1710,7 @@ public class FTRUMInnerManager {
                 errorField.put(Constants.KEY_RUM_SESSION_START_REASON, bean.sessionStartReason);
                 errorTags.put(Constants.KEY_RUM_ERROR_TYPE, ErrorType.NETWORK.toString());
                 errorTags.put(Constants.KEY_RUM_ERROR_SOURCE, ErrorSource.NETWORK.toString());
-                errorTags.put(Constants.KEY_RUM_ERROR_SITUATION, FTActivityManager.get().getAppState());
+                errorTags.put(Constants.KEY_RUM_ERROR_SITUATION, EventAppState.toLegacy(bean.errorAppState).toString());
                 errorTags.put(Constants.KEY_RUM_ACTION_ID, actionId);
                 errorTags.put(Constants.KEY_RUM_ACTION_NAME, actionName);
                 errorTags.put(Constants.KEY_RUM_VIEW_ID, viewId);
@@ -1831,7 +1858,7 @@ public class FTRUMInnerManager {
         }
 
         if (params.property != null) {
-            bean.property.putAll(params.property);
+            RUMCustomKeys.putUserProperties(bean.property, params.property);
         }
 
         if (FTTraceConfigManager.get().isEnableLinkRUMData()) {
@@ -2015,6 +2042,9 @@ public class FTRUMInnerManager {
     private void closeAction(ActiveActionBean bean, final boolean force) {
         if (bean.summaryGenerated) return;
         final String actionId = bean.getId();
+        if (bean.frozenAppState == null) {
+            bean.frozenAppState = appStateHistory().during(bean.getStartTime(), bean.getDuration());
+        }
         closingActions.put(actionId, bean);
         final long duration = bean.getDuration();
         final String attr = bean.getAttrJsonString();
@@ -2102,7 +2132,12 @@ public class FTRUMInnerManager {
 
     void attachRUMRelative(HashMap<String, Object> tags, HashMap<String, Object> fields,
                            boolean withAction, AppState state) {
-        RUMViewContext viewContext = resolveRUMViewContext(state);
+        attachRUMRelative(tags, fields, withAction, state, false);
+    }
+
+    private void attachRUMRelative(HashMap<String, Object> tags, HashMap<String, Object> fields,
+                                  boolean withAction, AppState state, boolean preferActiveView) {
+        RUMViewContext viewContext = resolveRUMViewContext(state, preferActiveView);
         tags.put(Constants.KEY_RUM_VIEW_ID, viewContext.viewId);
         tags.put(Constants.KEY_RUM_VIEW_NAME, viewContext.viewName);
         tags.put(Constants.KEY_RUM_VIEW_REFERRER, viewContext.viewReferrer);
@@ -2220,12 +2255,14 @@ public class FTRUMInnerManager {
         tags.put(Constants.KEY_RUM_ACTION_TYPE, bean.getActionType());
         tags.put(Constants.KEY_RUM_SESSION_ID, bean.getSessionId());
 
-        HashMap<String, Object> fields = new HashMap<>(bean.getProperty());
+        HashMap<String, Object> fields = RUMCustomKeys.copy(bean.getProperty());
         fields.put(Constants.KEY_RUM_SESSION_START_REASON, bean.getSessionStartReason());
         fields.put(Constants.KEY_RUM_ACTION_LONG_TASK_COUNT, bean.getLongTaskCount());
         fields.put(Constants.KEY_RUM_ACTION_RESOURCE_COUNT, bean.getResourceCount());
         fields.put(Constants.KEY_RUM_ACTION_ERROR_COUNT, bean.getErrorCount());
         fields.put(Constants.KEY_RUM_ACTION_DURATION, bean.getDuration());
+        fields.put(Constants.KEY_RUM_APP_STATE, bean.frozenAppState == null
+                ? AppStateHistory.UNKNOWN : bean.frozenAppState);
         if (bean.isHasReplay()) {
             fields.put(Constants.KEY_HAS_REPLAY, true);
         }
@@ -2298,7 +2335,7 @@ public class FTRUMInnerManager {
         tags.put(Constants.KEY_RUM_VIEW_REFERRER, bean.getViewReferrer());
         tags.put(Constants.KEY_RUM_VIEW_ID, bean.getId());
 
-        HashMap<String, Object> fields = new HashMap<>(bean.getProperty());
+        HashMap<String, Object> fields = RUMCustomKeys.copy(bean.getProperty());
         fields.put(Constants.KEY_RUM_SESSION_START_REASON, bean.getSessionStartReason());
         fields.put(Constants.KEY_RUM_APP_STATE, viewAppState(bean, Utils.getCurrentNanoTime()));
         if (bean.isHasReplay()) {

@@ -1,3 +1,8 @@
+# native 1.1.5-beta01
+
+1. Added a separate cache directory for reusable crash-report reserves. Completed reports and in-progress ANR traces stay in the existing files directory. Older Agent versions continue to use the single-directory layout.
+
+---
 # native 1.1.4
 1. Fixed custom logcat settings being applied under the wrong collection switch: Native Crash settings now follow Native Crash enablement, and ANR settings follow native ANR enablement. This restores custom logcat line limits when only one collector is enabled, including Native Crash on Android 11+ where the Agent disables native ANR collection.
 2. Improved public API Javadocs. Public method signatures and bundled native `.so` libraries are unchanged from 1.1.3.

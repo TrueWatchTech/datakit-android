@@ -11,10 +11,12 @@ import com.ft.sdk.garble.utils.PackageUtils;
 import com.ft.sdk.garble.utils.StringUtils;
 import com.ft.sdk.garble.utils.Utils;
 import com.ft.sdk.internal.exception.FTInvalidParameterException;
+import com.ft.sdk.internal.RUMCustomKeys;
 
 import org.json.JSONObject;
 
 import java.util.Collections;
+import java.util.ConcurrentModificationException;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -43,6 +45,11 @@ public class SyncDataHelper {
     private final HashMap<String, Object> dynamicLogTags;
     private final HashMap<String, Object> dynamicLRumTags;
     private volatile FTRUMConfig rumConfig;
+    private final Object contextLock = new Object();
+    private final Set<String> baseUserKeys = new HashSet<>();
+    private final Set<String> rumUserKeys = new HashSet<>();
+    private final Set<String> dynamicBaseUserKeys = new HashSet<>();
+    private final Set<String> dynamicRUMUserKeys = new HashSet<>();
 
     private final Set<String> rumReservedKeys;
 
@@ -74,20 +81,41 @@ public class SyncDataHelper {
         this.dataModifier = config.getDataModifier();
         this.lineDataModifier = config.getLineDataModifier();
 
-        basePublicTags.putAll(applyModifier(config.getGlobalContext()));
-        rumReservedKeys.addAll(config.getGlobalContext().keySet());
+        HashMap<String, Object> values = contextValues(config.getGlobalContext());
+        Set<String> keys = config.userGlobalContextKeys == null
+                ? RUMCustomKeys.userKeys(values) : new HashSet<>(config.userGlobalContextKeys);
+        applyModifier(values);
+        config.getGlobalContext().putAll(values);
+        synchronized (contextLock) {
+            basePublicTags.putAll(values);
+            baseUserKeys.addAll(keys);
+            rumReservedKeys.addAll(values.keySet());
+        }
     }
 
     void initLogConfig(FTLoggerConfig config) {
         this.logConfig = config;
-        logTags.putAll(basePublicTags);
-        logTags.putAll(applyModifier(config.getGlobalContext()));
+        HashMap<String, Object> values = new HashMap<>(config.getGlobalContext());
+        applyModifier(values);
+        config.getGlobalContext().putAll(values);
+        synchronized (contextLock) {
+            logTags.putAll(basePublicTags);
+            logTags.putAll(values);
+        }
     }
 
     void initRUMConfig(FTRUMConfig config) {
         rumConfig = config;
-        rumTags.putAll(basePublicTags);
-        rumTags.putAll(applyModifier(config.getGlobalContext()));
+        HashMap<String, Object> values = contextValues(config.getGlobalContext());
+        Set<String> keys = config.userGlobalContextKeys == null
+                ? RUMCustomKeys.userKeys(values) : new HashSet<>(config.userGlobalContextKeys);
+        applyModifier(values);
+        config.getGlobalContext().putAll(values);
+        synchronized (contextLock) {
+            rumTags.putAll(basePublicTags);
+            rumTags.putAll(values);
+            rumUserKeys.addAll(keys);
+        }
         rumReservedKeys.add(Constants.KEY_RUM_SESSION_SAMPLE_RATE);
         rumReservedKeys.add(Constants.KEY_RUM_SESSION_ON_ERROR_SAMPLE_RATE);
         rumReservedKeys.add(Constants.KEY_RUM_SESSION_REPLAY_SAMPLE_RATE);
@@ -119,40 +147,33 @@ public class SyncDataHelper {
 
     HashMap<String, Object> checkSessionReplayRUMLinksKeys(String[] rumLinkKeys) {
         HashMap<String, Object> rumLinkData = new HashMap<>();
-
-        // Check keys in tagMaps
-        for (String rumKey : rumLinkKeys) {
-            for (String tagKey : rumTags.keySet()) {
-                if (tagKey.contains(rumKey)) {
-                    rumLinkData.put(tagKey, rumTags.get(tagKey));
+        synchronized (contextLock) {
+            for (String rumKey : rumLinkKeys) {
+                for (String tagKey : rumTags.keySet()) {
+                    if (tagKey.contains(rumKey)) rumLinkData.put(tagKey, rumTags.get(tagKey));
                 }
             }
         }
         return rumLinkData;
-
     }
 
-    /**
-     * Replace the entire dictionary
-     *
-     * @param map
-     * @return
-     */
-    private Map<String, Object> applyModifier(HashMap<String, Object> map) {
-        if (dataModifier == null || map == null) return map;
-        Iterator<Map.Entry<String, Object>> it = map.entrySet().iterator();
-        while (it.hasNext()) {
-            Map.Entry<String, Object> entry = it.next();
+    private void applyModifier(HashMap<String, Object> map) {
+        applyModifier(map, null);
+    }
+
+    private void applyModifier(HashMap<String, Object> map, Map<String, Object> changes) {
+        if (dataModifier == null || map == null) return;
+        for (Map.Entry<String, Object> entry : map.entrySet()) {
             String key = entry.getKey();
             Object oldValue = entry.getValue();
             Object newValue = dataModifier.modify(key, oldValue);
-            if (newValue != oldValue) {
-                if (newValue != null && !newValue.equals(oldValue)) {
-                    entry.setValue(newValue);
+            if (newValue != oldValue && newValue != null && !newValue.equals(oldValue)) {
+                entry.setValue(newValue);
+                if (changes != null) {
+                    changes.put(key, newValue);
                 }
             }
         }
-        return map;
     }
 
 
@@ -207,67 +228,63 @@ public class SyncDataHelper {
      *
      * @param globalContext
      */
-    void appendGlobalContext(HashMap<String, Object> globalContext) {
-        if (globalContext != null) {
-            applyModifier(globalContext);
-            dynamicBaseTags.putAll(globalContext);
-            rumReservedKeys.addAll(globalContext.keySet());
-        }
+    Map<String, Object> appendGlobalContext(HashMap<String, Object> globalContext) {
+        return appendContext(globalContext, false, true);
     }
 
-    /**
-     * Dynamically set global tag
-     *
-     * @param key
-     * @param value
-     */
+    Map<String, Object> appendInternalGlobalContext(HashMap<String, Object> globalContext) {
+        return appendContext(globalContext, false, false);
+    }
+
     void appendGlobalContext(String key, String value) {
         if (!Utils.isNullOrEmpty(key) && !Utils.isNullOrEmpty(value)) {
-            dynamicBaseTags.put(key, applyModifier(key, value));
-            rumReservedKeys.add(key);
+            HashMap<String, Object> values = new HashMap<>();
+            values.put(key, value);
+            appendGlobalContext(values);
         }
     }
 
-
-    /**
-     * Dynamically set RUM global tag
-     *
-     * @param globalContext
-     */
-    void appendRUMGlobalContext(HashMap<String, Object> globalContext) {
-        if (globalContext != null) {
-            applyModifier(globalContext);
-            dynamicLRumTags.putAll(globalContext);
-            rumReservedKeys.addAll(globalContext.keySet());
-            Object keyArr = rumTags.get(Constants.KEY_RUM_CUSTOM_KEYS);
-            if (keyArr == null) {
-                keyArr = "[]";
-            }
-            String keyArrString = (String) keyArr;
-            rumTags.put(Constants.KEY_RUM_CUSTOM_KEYS,
-                    Utils.addItemsToJsonArray(keyArrString, globalContext.keySet()));
-        }
+    Map<String, Object> appendRUMGlobalContext(HashMap<String, Object> globalContext) {
+        return appendContext(globalContext, true, true);
     }
 
-    /**
-     * Dynamically set RUM global tag
-     *
-     * @param key
-     * @param value
-     */
     void appendRUMGlobalContext(String key, String value) {
         if (!Utils.isNullOrEmpty(key) && !Utils.isNullOrEmpty(value)) {
-            dynamicLRumTags.put(key, applyModifier(key, value));
-            rumReservedKeys.add(key);
-
-            Object keyArr = rumTags.get(Constants.KEY_RUM_CUSTOM_KEYS);
-            if (keyArr == null) {
-                keyArr = "[]";
-            }
-            String keyArrString = (String) keyArr;
-            rumTags.put(Constants.KEY_RUM_CUSTOM_KEYS, Utils.addItemToJsonArray(keyArrString, key));
-
+            HashMap<String, Object> values = new HashMap<>();
+            values.put(key, value);
+            appendRUMGlobalContext(values);
         }
+    }
+
+    private static HashMap<String, Object> contextValues(Map<String, Object> context) {
+        HashMap<String, Object> values = new HashMap<>(context);
+        values.remove(Constants.KEY_RUM_CUSTOM_KEYS);
+        return values;
+    }
+
+    // Return the accepted snapshot for Replay, or null if the batch was skipped.
+    private Map<String, Object> appendContext(HashMap<String, Object> context, boolean rum, boolean user) {
+        if (context == null) return null;
+        HashMap<String, Object> values;
+        try {
+            values = contextValues(context);
+        } catch (ConcurrentModificationException ignored) {
+            return null;
+        }
+        Set<String> keys = user ? RUMCustomKeys.userKeys(values) : Collections.emptySet();
+        if (dataModifier != null) {
+            HashMap<String, Object> changes = new HashMap<>();
+            applyModifier(values, changes);
+            if (!changes.isEmpty()) {
+                context.putAll(changes);
+            }
+        }
+        synchronized (contextLock) {
+            (rum ? dynamicLRumTags : dynamicBaseTags).putAll(values);
+            (rum ? dynamicRUMUserKeys : dynamicBaseUserKeys).addAll(keys);
+            rumReservedKeys.addAll(values.keySet());
+        }
+        return values;
     }
 
     Set<String> getRUMReservedKeys() {
@@ -282,7 +299,9 @@ public class SyncDataHelper {
     void appendLogGlobalContext(HashMap<String, Object> globalContext) {
         if (globalContext != null) {
             applyModifier(globalContext);
-            dynamicLogTags.putAll(globalContext);
+            synchronized (contextLock) {
+                dynamicLogTags.putAll(globalContext);
+            }
         }
     }
 
@@ -294,7 +313,10 @@ public class SyncDataHelper {
      */
     void appendLogGlobalContext(String key, String value) {
         if (!Utils.isNullOrEmpty(key) && !Utils.isNullOrEmpty(value)) {
-            dynamicLogTags.put(key, applyModifier(key, value));
+            Object modified = applyModifier(key, value);
+            synchronized (contextLock) {
+                dynamicLogTags.put(key, modified);
+            }
         }
     }
 
@@ -319,6 +341,25 @@ public class SyncDataHelper {
     public String getBodyContent(String measurement, HashMap<String, Object> tags,
                                  HashMap<String, Object> fields, long timeStamp, DataType dataType,
                                  String uuid, String visitorId) {
+        return getBodyContent(measurement, tags, fields, timeStamp, dataType, uuid,
+                visitorId, new RUMCustomKeys(tags, fields));
+    }
+
+    public String getBodyContent(String measurement, HashMap<String, Object> tags,
+                                 HashMap<String, Object> fields, long timeStamp, DataType dataType,
+                                 String uuid, String visitorId, RUMCustomKeys customKeys) {
+        boolean rum = isRUMDataType(dataType);
+        boolean web = dataType == DataType.RUM_WEBVIEW || dataType == DataType.RUM_WEBVIEW_ERROR_SAMPLED;
+        boolean browserFieldList = web && fields != null && fields.containsKey(Constants.KEY_RUM_CUSTOM_KEYS);
+        Set<String> browserKeys = new HashSet<>();
+        if (web) {
+            browserKeys.addAll(RUMCustomKeys.parse(tags == null ? null : tags.get(Constants.KEY_RUM_CUSTOM_KEYS)));
+            browserKeys.addAll(RUMCustomKeys.parse(fields == null ? null : fields.get(Constants.KEY_RUM_CUSTOM_KEYS)));
+        }
+        if (rum) {
+            if (tags != null) tags.remove(Constants.KEY_RUM_CUSTOM_KEYS);
+            if (fields != null) fields.remove(Constants.KEY_RUM_CUSTOM_KEYS);
+        }
         if (dataType != DataType.RUM_APP && dataType != DataType.RUM_APP_ERROR_SAMPLED) {
             visitorId = null;
         }
@@ -336,6 +377,27 @@ public class SyncDataHelper {
         }
         applyModifier(tags);
         applyModifier(fields);
+        HashMap<String, Object> currentDynamic;
+        HashMap<String, Object> currentStatic;
+        Set<String> globalKeys = new HashSet<>();
+        Set<String> legacyLogKeys = new HashSet<>();
+        boolean linkLog = dataType == DataType.LOG && logConfig != null && logConfig.isEnableLinkRumData();
+        synchronized (contextLock) {
+            currentDynamic = new HashMap<>(dynamicBaseTags);
+            currentDynamic.putAll(rum ? dynamicLRumTags : dynamicLogTags);
+            currentStatic = new HashMap<>(rum ? rumTags : logTags);
+            if (linkLog) currentStatic.putAll(rumTags);
+            if (rum) {
+                globalKeys.addAll(baseUserKeys);
+                globalKeys.addAll(rumUserKeys);
+                globalKeys.addAll(dynamicBaseUserKeys);
+                globalKeys.addAll(dynamicRUMUserKeys);
+            }
+            if (linkLog) {
+                legacyLogKeys.addAll(rumUserKeys);
+                legacyLogKeys.addAll(dynamicRUMUserKeys);
+            }
+        }
         HashMap<String, Object> mergeTags = new LinkedHashMap<>();
         mergeTags.put(KEY_SDK_DATA_FLAG, uuid);//Put uuid in the first position to save cost during string replacement
         if (tags != null) {
@@ -344,15 +406,15 @@ public class SyncDataHelper {
         String bodyContent;
         if (dataType == DataType.LOG) {
             // log data
-            mergeTags.putAll(dynamicBaseTags);
-            mergeTags.putAll(dynamicLogTags);
+            mergeTags.putAll(currentDynamic);
             if (webViewLog) {
-                mergeWebViewLogTags(mergeTags);
+                if (linkLog) appendLegacyLogKeys(currentStatic, legacyLogKeys);
+                mergeWebViewNativeTags(mergeTags, currentStatic);
                 mergeTags.put(Constants.KEY_RUM_VIEW_IS_WEB_VIEW, true);
             } else {
-                mergeTags.putAll(logTags);
-                if (logConfig != null && logConfig.isEnableLinkRumData()) {
-                    mergeTags.putAll(rumTags);
+                mergeTags.putAll(currentStatic);
+                if (linkLog) {
+                    appendLegacyLogKeys(mergeTags, legacyLogKeys);
                 }
             }
             if (appLineModifier(dataType, measurement, uuid, mergeTags, fields)) {
@@ -363,15 +425,14 @@ public class SyncDataHelper {
         } else if (dataType == DataType.RUM_APP || dataType == DataType.RUM_APP_ERROR_SAMPLED
                 || dataType == DataType.RUM_WEBVIEW || dataType == DataType.RUM_WEBVIEW_ERROR_SAMPLED) {
             //rum data
-            mergeTags.putAll(dynamicBaseTags);
-            mergeTags.putAll(dynamicLRumTags);
+            mergeTags.putAll(currentDynamic);
             if (dataType == DataType.RUM_APP || dataType == DataType.RUM_APP_ERROR_SAMPLED) {
-                mergeTags.putAll(rumTags);
+                mergeTags.putAll(currentStatic);
                 appendRUMSamplingFields(fields);
                 mergeTags.remove(Constants.KEY_RUM_APP_STATE);
                 mergeTags.remove(Constants.KEY_RUM_SESSION_START_REASON);
             } else {
-                mergeWebViewNativeTags(mergeTags, rumTags);
+                mergeWebViewNativeTags(mergeTags, currentStatic);
                 // Browser owns this identity (including its absence). Native global
                 // contexts must not replace it or add a second copy beside a Browser field.
                 mergeTags.remove(FTVisitorIdManager.KEY);
@@ -382,6 +443,14 @@ public class SyncDataHelper {
             if (visitorId != null) {
                 fields.remove(FTVisitorIdManager.KEY);
                 mergeTags.put(FTVisitorIdManager.KEY, applyModifier(FTVisitorIdManager.KEY, visitorId));
+            }
+            String list = customKeys.serialize(mergeTags, fields, globalKeys, browserKeys);
+            if (list != null) {
+                if (browserFieldList) {
+                    fields.put(Constants.KEY_RUM_CUSTOM_KEYS, applyModifier(Constants.KEY_RUM_CUSTOM_KEYS, list));
+                } else {
+                    mergeTags.put(Constants.KEY_RUM_CUSTOM_KEYS, applyModifier(Constants.KEY_RUM_CUSTOM_KEYS, list));
+                }
             }
             if (appLineModifier(dataType, measurement, uuid, mergeTags, fields)) {
                 return "";
@@ -394,13 +463,9 @@ public class SyncDataHelper {
 
     }
 
-    private void mergeWebViewLogTags(HashMap<String, Object> mergeTags) {
-        HashMap<String, Object> nativeTags = new LinkedHashMap<>();
-        nativeTags.putAll(logTags);
-        if (logConfig != null && logConfig.isEnableLinkRumData()) {
-            nativeTags.putAll(rumTags);
-        }
-        mergeWebViewNativeTags(mergeTags, nativeTags);
+    private void appendLegacyLogKeys(HashMap<String, Object> tags, Set<String> keys) {
+        if (!keys.isEmpty()) tags.put(Constants.KEY_RUM_CUSTOM_KEYS,
+                applyModifier(Constants.KEY_RUM_CUSTOM_KEYS, new org.json.JSONArray(keys).toString()));
     }
 
     /**
@@ -565,7 +630,17 @@ public class SyncDataHelper {
      * @return
      */
     SyncDataCompatHelper getCompat() {
-        return new SyncDataCompatHelper(logTags, rumTags, config);
+        HashMap<String, Object> currentRUM;
+        HashMap<String, Object> currentLog;
+        Set<String> keys;
+        synchronized (contextLock) {
+            currentRUM = new HashMap<>(rumTags);
+            currentLog = new HashMap<>(logTags);
+            keys = new HashSet<>(rumUserKeys);
+            keys.addAll(dynamicRUMUserKeys);
+        }
+        appendLegacyLogKeys(currentRUM, keys);
+        return new SyncDataCompatHelper(currentLog, currentRUM, config);
     }
 
 

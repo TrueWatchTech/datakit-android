@@ -21,6 +21,7 @@ import com.ft.sdk.garble.utils.VersionUtils;
 import com.ft.sdk.nativelib.CrashCallback;
 import com.ft.sdk.nativelib.NativeEngineInit;
 import com.ft.sdk.nativelib.NativeExtraLogCatSetting;
+import com.ft.sdk.internal.RUMCustomKeys;
 
 import java.io.File;
 import java.util.HashMap;
@@ -84,6 +85,7 @@ public class FTRUMConfigManager {
             FTRUMInnerManager.get().closePreviousProcessRumData();
         }
         FTUIBlockManager.get().start(config);
+        FTAutoTrack.syncActiveActivitiesForRum();
         if (config.isRumEnable() && config.isEnableTraceUserAction()) {
             //Handle flutter reactNative application lifecycle starting earlier than condition setting
             FTAppStartCounter.get().checkToReUpload();
@@ -163,10 +165,16 @@ public class FTRUMConfigManager {
                                 config.getExtraLogCatWithANR().getLogcatEventsLines());
                     }
 
-                    NativeEngineInit.init(application, filePath, enableTrackAppCrash, enableNativeTrackAppANR,
-                            crashCallback,
-                            nativeExtraLogCatSetting,
-                            anrExtraLogCatSetting);
+                    File cacheDir = application.getCacheDir();
+                    String pool = cacheDir == null ? null : new File(cacheDir, FTSdk.NATIVE_DUMP_PATH).getPath();
+                    try {
+                        NativeEngineInit.init(application, filePath, enableTrackAppCrash, enableNativeTrackAppANR,
+                                crashCallback, nativeExtraLogCatSetting, anrExtraLogCatSetting, pool);
+                    } catch (NoSuchMethodError olderNative) {
+                        // Native is optional and the host may pin a previously published version.
+                        NativeEngineInit.init(application, filePath, enableTrackAppCrash, enableNativeTrackAppANR,
+                                crashCallback, nativeExtraLogCatSetting, anrExtraLogCatSetting);
+                    }
                 } else {
                     NativeEngineInit.init(application, filePath, enableTrackAppCrash, enableNativeTrackAppANR,
                             crashCallback);
@@ -294,7 +302,7 @@ public class FTRUMConfigManager {
             data.setId(id);
             data.setName(name);
             data.setEmail(email);
-            data.setExts(exts);
+            data.setExts(exts == null ? null : new HashMap<>(exts));
             mUserData = data;
         }
     }
@@ -322,9 +330,7 @@ public class FTRUMConfigManager {
     void initRUMGlobalContext(FTRUMConfig config) {
         Context context = FTApplication.getApplication();
         HashMap<String, Object> rumGlobalContext = config.getGlobalContext();
-        if (!rumGlobalContext.isEmpty()) {
-            rumGlobalContext.put(Constants.KEY_RUM_CUSTOM_KEYS, Utils.setToJsonString(rumGlobalContext.keySet()));
-        }
+        config.captureUserGlobalContextKeys();
         rumGlobalContext.put(Constants.KEY_RUM_APP_ID, config.getRumAppId());
         rumGlobalContext.put(Constants.KEY_RUM_SESSION_TYPE, "user");
         rumGlobalContext.put(Constants.KEY_DEVICE_OS, DeviceUtils.getOSName());
@@ -347,11 +353,11 @@ public class FTRUMConfigManager {
      * @return
      */
     HashMap<String, Object> getRUMPublicDynamicTags() {
-        HashMap<String, Object> tags = new HashMap<>();
+        HashMap<String, Object> tags = RUMCustomKeys.newMap();
         tags.put(Constants.KEY_RUM_NETWORK_TYPE, FTNetworkListener.get().getNetworkStateBean().getNetworkType());
-        tags.put(Constants.KEY_RUM_IS_SIGN_IN, isUserDataBinded() ? "T" : "F");
-        if (isUserDataBinded()) {
-            UserData data = getUserData();
+        UserData data = getUserData();
+        tags.put(Constants.KEY_RUM_IS_SIGN_IN, data != null ? "T" : "F");
+        if (data != null) {
             tags.put(Constants.KEY_RUM_USER_ID, data.getId());
             if (data.getName() != null) {
                 tags.put(Constants.KEY_RUM_USER_NAME, data.getName());
@@ -362,9 +368,7 @@ public class FTRUMConfigManager {
             }
             if (data.getExts() != null) {
                 HashMap<String, String> ext = data.getExts();
-                for (String key : ext.keySet()) {
-                    tags.put(key, ext.get(key));
-                }
+                RUMCustomKeys.putUserProperties(tags, ext);
             }
         } else {
             tags.put(Constants.KEY_RUM_USER_ID, LocalUUIDManager.get().getRandomUUID());

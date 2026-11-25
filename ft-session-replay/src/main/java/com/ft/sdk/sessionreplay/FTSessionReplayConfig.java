@@ -12,7 +12,7 @@ import java.util.List;
  * Configuration object used to enable and customize Session Replay recording.
  * <p>
  * Create an instance, configure the sampling and privacy options, then pass it to
- * the SDK initialization API.
+ * {@code FTSdk.initSessionReplayConfig(config)} after RUM initialization.
  */
 public class FTSessionReplayConfig {
     private String customEndpointUrl;
@@ -69,7 +69,14 @@ public class FTSessionReplayConfig {
     /** Returns the effective SessionReplaySamplingRate percentage. */
     public float getSessionReplaySamplingRate() { return sampleRate * 100f; }
 
-    /** Sets a finite percentage in [0,100]; explicit new values take precedence over legacy values. */
+    /**
+     * Sets the regular sampling percentage (default 100). For example, {@code 0.1f} means 0.1%.
+     * An explicit percentage takes precedence over {@link #setSampleRate(float)} in either call order.
+     *
+     * @param percentage finite value from 0 through 100
+     * @return this configuration
+     * @throws IllegalArgumentException if the value is outside the range or is not finite
+     */
     public FTSessionReplayConfig setSessionReplaySamplingRate(@FloatRange(from = 0.0, to = 100.0) float percentage) {
         validatePercentage(percentage);
         sampleRate = percentage / 100f;
@@ -80,7 +87,14 @@ public class FTSessionReplayConfig {
     /** Returns the effective SessionReplayOnErrorSamplingRate percentage. */
     public float getSessionReplayOnErrorSamplingRate() { return sessionReplayOnErrorSampleRate * 100f; }
 
-    /** Sets a finite percentage in [0,100]; explicit new values take precedence over legacy values. */
+    /**
+     * Sets the error-session sampling percentage (default 0). For example, {@code 0.1f} means 0.1%.
+     * An explicit percentage takes precedence over {@link #setSessionReplayOnErrorSampleRate(float)} in either call order.
+     *
+     * @param percentage finite value from 0 through 100
+     * @return this configuration
+     * @throws IllegalArgumentException if the value is outside the range or is not finite
+     */
     public FTSessionReplayConfig setSessionReplayOnErrorSamplingRate(@FloatRange(from = 0.0, to = 100.0) float percentage) {
         validatePercentage(percentage);
         sessionReplayOnErrorSampleRate = percentage / 100f;
@@ -290,16 +304,17 @@ public class FTSessionReplayConfig {
     }
 
     /**
-     * Returns whether Session Replay initialization should be delayed.
+     * Returns whether the native recorder should recover the current window after late initialization.
      */
     public boolean isDelayInit() {
         return delayInit;
     }
 
     /**
-     * Sets whether Session Replay initialization should be delayed.
+     * Use when initializing Replay after an Activity is already visible. On resume, if no window
+     * has been observed, the native recorder tries once to obtain the current Activity window.
      *
-     * @param delayInit true to delay initialization, false to initialize immediately
+     * @param delayInit true to enable window recovery (default false)
      * @return the current configuration instance
      */
     public FTSessionReplayConfig setDelayInit(boolean delayInit) {
@@ -347,7 +362,7 @@ public class FTSessionReplayConfig {
     }
 
     /**
-     * Returns whether dynamic optimization is enabled.
+     * Returns the stored dynamic optimization preference (default true).
      */
     public boolean isDynamicOptimizationEnabled() {
         return dynamicOptimizationEnabled;
@@ -361,9 +376,10 @@ public class FTSessionReplayConfig {
     }
 
     /**
-     * Enables or disables dynamic optimization during recording.
+     * Stores the dynamic optimization preference. The current native draw listener uses the same
+     * snapshot sampling setting for either value.
      *
-     * @param dynamicOptimizationEnabled true to enable dynamic optimization
+     * @param dynamicOptimizationEnabled value returned by {@link #isDynamicOptimizationEnabled()}
      * @return the current configuration instance
      */
     public FTSessionReplayConfig setDynamicOptimizationEnabled(boolean dynamicOptimizationEnabled) {

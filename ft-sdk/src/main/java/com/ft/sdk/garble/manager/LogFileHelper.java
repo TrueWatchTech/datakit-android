@@ -3,7 +3,6 @@ package com.ft.sdk.garble.manager;
 import android.content.Context;
 
 import com.ft.sdk.garble.utils.Constants;
-import com.ft.sdk.garble.utils.LogUtils;
 import com.ft.sdk.garble.utils.Utils;
 
 import java.io.File;
@@ -47,7 +46,17 @@ public class LogFileHelper {
     private final int splitFileSize;
 
     public LogFileHelper(Context context, File cache, boolean isAndroidTest) {
-        this.backupLogDir = new File(context.getFilesDir(), LOG_BACKUP_CACHE_PATH);
+        this(cache, new File(context.getFilesDir(), LOG_BACKUP_CACHE_PATH), isAndroidTest);
+    }
+
+    /** SDK-owned default output. Explicit log paths keep their original archive directory. */
+    public static LogFileHelper forDefaultLog(File cacheDir, boolean isAndroidTest) {
+        File dir = new File(cacheDir, "ft_sdk/logs");
+        return new LogFileHelper(new File(dir, "LogInner.log"), new File(dir, LOG_BACKUP_CACHE_PATH), isAndroidTest);
+    }
+
+    private LogFileHelper(File cache, File backupLogDir, boolean isAndroidTest) {
+        this.backupLogDir = backupLogDir;
         if (!backupLogDir.exists()) {
             backupLogDir.mkdirs();
         }
@@ -58,15 +67,18 @@ public class LogFileHelper {
 
     /**
      * Append log
-     * Note: Avoid using {@link LogUtils} to print logs, 
+     * Note: Avoid using the SDK logger to print logs,
      * as it may cause stack overflow
      *
      * @param logMessage Log data
      */
-    public void appendLog(String logMessage) {
+    public synchronized void appendLog(String logMessage) {
+        if (!backupLogDir.isDirectory()) {
+            // Android can reclaim the entire SDK cache directory between two appends.
+            backupLogDir.mkdirs();
+        }
         if (cacheFile.length() >= splitFileSize) {
-            String filePath = cacheFile.getAbsolutePath();
-            splitLog(filePath);
+            splitLog();
         }
         try {
             Utils.writeToFile(cacheFile, logMessage);
@@ -78,15 +90,23 @@ public class LogFileHelper {
     /**
      * Split log to {@link #LOG_BACKUP_CACHE_PATH}
      *
-     * @param filePath Log path
      */
-    private void splitLog(String filePath) {
-        File oldLogFile = new File(filePath);
-        File newLogFile = new File(backupLogDir,
-                Utils.getNameWithoutExtension(oldLogFile.getName())
-                        + "_" + System.currentTimeMillis() + ".log");
-        oldLogFile.renameTo(newLogFile);
-        deleteOldLogFilesIfNecessary(backupLogDir);
+    private void splitLog() {
+        String prefix = Utils.getNameWithoutExtension(cacheFile.getName()) + "_";
+        long timestamp = System.currentTimeMillis();
+        try {
+            File archive;
+            do {
+                archive = new File(backupLogDir, prefix + timestamp++ + ".log");
+            } while (!archive.createNewFile());
+            if (cacheFile.renameTo(archive)) {
+                deleteOldLogFilesIfNecessary(backupLogDir);
+            } else {
+                archive.delete();
+            }
+        } catch (IOException e) {
+            android.util.Log.w(TAG, "Unable to rotate SDK log", e);
+        }
     }
 
     /**
@@ -123,7 +143,7 @@ public class LogFileHelper {
                         break;
                     }
                 } else {
-                    LogUtils.e(TAG, "Failed to delete log file: " + file.getAbsolutePath());
+                    android.util.Log.w(TAG, "Failed to delete log file: " + file.getAbsolutePath());
                 }
             }
         }

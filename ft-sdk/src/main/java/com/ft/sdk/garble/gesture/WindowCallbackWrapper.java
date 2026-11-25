@@ -33,20 +33,26 @@ import java.lang.ref.WeakReference;
 public class WindowCallbackWrapper implements Window.Callback {
 
     private static final String TAG = "WindowCallbackWrapper";
+    static final Window.Callback EMPTY_CALLBACK = new NoOpWindowCallback();
     private final Window.Callback wrappedCallback;
     private final WeakReference<Window> weekWindow;
+    private volatile boolean tracking = true;
+
+    void stopTracking() {
+        tracking = false;
+    }
 
 
     public WindowCallbackWrapper(Window window,
                                  Window.Callback wrappedCallback
     ) {
         this.weekWindow = new WeakReference<>(window);
-        this.wrappedCallback = wrappedCallback == null ? new NoOpWindowCallback() : wrappedCallback;
+        this.wrappedCallback = wrappedCallback == null ? EMPTY_CALLBACK : wrappedCallback;
     }
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
-        if (event != null) {
+        if (tracking && event != null) {
             if (event.getAction() == KeyEvent.ACTION_UP) {
                 LogUtils.d(TAG, event.toString());
                 FTActionTrackingHandler handler = FTRUMConfigManager.get().getConfig().getActionTrackingHandler();
@@ -127,7 +133,7 @@ public class WindowCallbackWrapper implements Window.Callback {
     @Override
     @MainThread
     public boolean dispatchTouchEvent(MotionEvent event) {
-        FTAutoTrack.trackWindowTouch(event);
+        if (tracking) FTAutoTrack.trackWindowTouch(event);
         return wrappedCallback.dispatchTouchEvent(event);
     }
 

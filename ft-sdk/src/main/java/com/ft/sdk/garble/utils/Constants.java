@@ -892,6 +892,8 @@ public class Constants {
      */
     public static final String ACTION_TYPE_LAUNCH_HOT = "launch_hot";
 
+    public static final String ACTION_TYPE_LAUNCH_WARM = "launch_warm";
+
     /**
      * Cold start, action_name
      */
@@ -900,5 +902,7 @@ public class Constants {
      * Hot start, action_name
      */
     public static final String ACTION_NAME_LAUNCH_HOT = "app hot start";
+
+    public static final String ACTION_NAME_LAUNCH_WARM = "app warm start";
 
 }

@@ -1,7 +1,7 @@
 package com.ft.sdk;
 
 /**
- * Extra log cat log configuration
+ * Line limits for Android Logcat buffers attached to crash or ANR reports.
  */
 public class ExtraLogCatSetting {
 
@@ -24,6 +24,8 @@ public class ExtraLogCatSetting {
     }
 
     /**
+     * Sets the line limit separately for each buffer. Values are clamped to 0–500.
+     *
      * @param logcatMainLines   This is the main log buffer, containing most of the application's log output, [0,500], default 200
      * @param logcatSystemLines System log buffer, containing system-level log information, [0,500], default 50
      * @param logcatEventsLines Event log buffer, mainly records specific event information, [0,500], default 50
@@ -34,14 +36,17 @@ public class ExtraLogCatSetting {
         this.logcatEventsLines = Math.min(Math.max(logcatEventsLines, MINI_LINES), MAX_LINES);
     }
 
+    /** Returns the maximum number of lines to read from the main buffer. */
     public int getLogcatMainLines() {
         return logcatMainLines;
     }
 
+    /** Returns the maximum number of lines to read from the system buffer. */
     public int getLogcatSystemLines() {
         return logcatSystemLines;
     }
 
+    /** Returns the maximum number of lines to read from the events buffer. */
     public int getLogcatEventsLines() {
         return logcatEventsLines;
     }

@@ -81,8 +81,11 @@ public class FTMonitorFieldsDeviceTest {
             });
             JSONArray pages = new JSONArray();
             String previousId = null;
+            // Start the manual view outside the automatic host view's summary debounce window.
+            SystemClock.sleep(DetectFrequency.DEFAULT.getValue());
+            String runName = "fields-regression-" + SystemClock.elapsedRealtimeNanos() + "-";
             for (int page = 0; page < 2; page++) {
-                String name = "fields-regression-" + page;
+                String name = runName + page;
                 HashMap<String, Object> properties = new HashMap<>();
                 properties.put("fields_regression_page", page);
                 instrumentation.runOnMainSync(() -> FTRUMGlobalManager.get().startView(name, properties));

@@ -10,6 +10,10 @@ import java.util.regex.Pattern;
 public class FTVisitorIdConfig {
     /** Matches a complete HTTP(S) URL. Exceptions are treated as a non-match. */
     public interface UrlMatcher {
+        /**
+         * @param url complete request URL including the query string, if present
+         * @return true if the request is eligible for the visitor header
+         */
         boolean matches(String url);
     }
 
@@ -17,13 +21,15 @@ public class FTVisitorIdConfig {
     private double ttlHours = 24;
     private final List<UrlMatcher> matchers = new ArrayList<>();
 
-    /** Sets the required lowercase custom header name. */
+    /** Sets the required lowercase HTTP header name. Authentication, signature, tracing and
+     * other reserved header names are rejected when RUM initializes. */
     public FTVisitorIdConfig setHeader(String header) {
         this.header = header;
         return this;
     }
 
-    /** Sets a positive fixed lifetime in hours; defaults to 24, without sliding renewal. */
+    /** Sets the fixed lifetime in hours (default 24). Fractional hours are supported;
+     * the lifetime must represent at least one millisecond and fit in a long millisecond count. */
     public FTVisitorIdConfig setTtlHours(double ttlHours) {
         this.ttlHours = ttlHours;
         return this;
@@ -51,7 +57,8 @@ public class FTVisitorIdConfig {
         return this;
     }
 
-    /** Adds a custom URL predicate. */
+    /** Adds a URL predicate. Any matching rule makes the URL eligible. A runtime exception
+     * from one predicate is treated as a non-match and the remaining rules are checked. */
     public FTVisitorIdConfig addMatch(UrlMatcher matcher) {
         matchers.add(matcher);
         return this;

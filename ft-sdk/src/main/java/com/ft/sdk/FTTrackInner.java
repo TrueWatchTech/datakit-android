@@ -28,6 +28,7 @@ import com.ft.sdk.garble.utils.HashMapUtils;
 import com.ft.sdk.garble.utils.LogUtils;
 import com.ft.sdk.garble.utils.Utils;
 import com.ft.sdk.internal.anr.historical.HistoricalAnrDataId;
+import com.ft.sdk.internal.RUMCustomKeys;
 
 import org.json.JSONObject;
 
@@ -36,6 +37,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -201,9 +203,14 @@ public class FTTrackInner {
      *
      * @param globalContext
      */
+    void appendInternalGlobalContext(HashMap<String, Object> globalContext) {
+        Map<String, Object> snapshot = dataHelper.appendInternalGlobalContext(globalContext);
+        SessionReplayBridge.appendRumLinkKeys(snapshot);
+    }
+
     void appendGlobalContext(HashMap<String, Object> globalContext) {
-        dataHelper.appendGlobalContext(globalContext);
-        SessionReplayBridge.appendRumLinkKeys(globalContext);
+        Map<String, Object> snapshot = dataHelper.appendGlobalContext(globalContext);
+        SessionReplayBridge.appendRumLinkKeys(snapshot);
     }
 
     /**
@@ -223,8 +230,8 @@ public class FTTrackInner {
      * @param globalContext
      */
     void appendRUMGlobalContext(HashMap<String, Object> globalContext) {
-        dataHelper.appendRUMGlobalContext(globalContext);
-        SessionReplayBridge.appendRumLinkKeys(globalContext);
+        Map<String, Object> snapshot = dataHelper.appendRUMGlobalContext(globalContext);
+        SessionReplayBridge.appendRumLinkKeys(snapshot);
     }
 
     /**
@@ -359,13 +366,14 @@ public class FTTrackInner {
                                        final String measurement, final HashMap<String, Object> tags,
                                        final HashMap<String, Object> fields, RunnerCompleteCallBack callBack,
                                        final String visitorId) {
+        final RUMCustomKeys customKeys = new RUMCustomKeys(tags, fields);
         DataProcessThreadPool.get().execute(new Runnable() {
             @Override
             public void run() {
                 boolean outcomeReported = false;
                 try {
                     SyncData recordData = SyncData.getSyncData(dataHelper, dataType,
-                            new LineProtocolBean(measurement, tags, fields, time), dataGenerateTime, visitorId);
+                            new LineProtocolBean(measurement, tags, fields, time, customKeys), dataGenerateTime, visitorId);
                     if (recordData == null) {
                         outcomeReported = true;
                         notifyRUMWriteResult(callBack, false);

@@ -14,7 +14,7 @@ import java.util.HashMap;
 /**
  * BY huangDianHua
  * DATE:2020-01-06 18:13
- * Description: User binding storage data
+ * User attributes supplied to {@link com.ft.sdk.FTSdk#bindRumUserData(UserData)}.
  */
 public class UserData {
     private static final String TAG = Constants.LOG_TAG_PREFIX + "UserData";
@@ -37,34 +37,42 @@ public class UserData {
      */
     private HashMap<String, String> exts;
 
+    /** Returns the display name, or null when unset. */
     public String getName() {
         return name;
     }
 
+    /** Sets the display name to attach to RUM events for the bound user. */
     public void setName(String name) {
         this.name = name;
     }
 
+    /** Returns the application-defined user ID, or null when unset. */
     public String getId() {
         return id;
     }
 
+    /** Sets the ID used to identify the signed-in user across RUM events. */
     public void setId(String id) {
         this.id = id;
     }
 
+    /** Returns the configured map of custom user attributes, or null when unset. */
     public HashMap<String, String> getExts() {
         return exts;
     }
 
+    /** Returns the email address, or null when unset. */
     public String getEmail() {
         return email;
     }
 
+    /** Sets the optional email address to include with the bound user. */
     public void setEmail(String email) {
         this.email = email;
     }
 
+    /** Sets the string attributes to bind alongside the user ID, name and email. */
     public void setExts(HashMap<String, String> exts) {
         this.exts = exts;
     }

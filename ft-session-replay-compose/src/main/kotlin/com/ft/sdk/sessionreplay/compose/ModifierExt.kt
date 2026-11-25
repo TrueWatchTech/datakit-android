@@ -15,9 +15,9 @@ import com.ft.sdk.sessionreplay.TextAndInputPrivacy
 import com.ft.sdk.sessionreplay.TouchPrivacy
 
 /**
- * Allows setting a composable to be hidden in the hierarchy in Session Replay.
+ * Marks this semantics node as hidden in Session Replay when [ComposeExtensionSupport] is registered.
  *
- * @param hide pass `true` to hide the composable, or `false` to remove the override
+ * @param hide pass `true` to hide the composable, or `false` to clear the hidden flag for this node
  * @return a modifier with the Session Replay hidden override
  */
 fun Modifier.sessionReplayHide(hide: Boolean): Modifier {

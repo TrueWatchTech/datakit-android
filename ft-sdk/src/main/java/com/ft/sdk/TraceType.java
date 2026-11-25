@@ -15,7 +15,7 @@ import java.util.Locale;
  */
 public enum TraceType {
     /**
-     * datadog trace, default value, {@link FTTraceConfig#traceType}
+     * datadog trace, default for {@link FTTraceConfig#setTraceType(TraceType)}
      * <p>
      * x-datadog-trace-id
      * x-datadog-parent-id
@@ -81,6 +81,7 @@ public enum TraceType {
 
     }
 
+    /** Returns the lowercase enum name, preserving the distinction between the two Zipkin formats. */
     public String value() {
         return super.toString().toLowerCase(Locale.ROOT);
     }

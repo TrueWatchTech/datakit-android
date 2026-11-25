@@ -3,6 +3,7 @@ package com.ft.sdk.garble.bean;
 import com.ft.sdk.FTRUMInnerManager;
 import com.ft.sdk.internal.metrics.NetworkSettledMetric;
 import com.ft.sdk.garble.utils.Utils;
+import com.ft.sdk.internal.RUMCustomKeys;
 
 import java.util.HashMap;
 
@@ -222,6 +223,8 @@ public class ResourceBean {
     public String sessionStartReason = "unknown";
     /** Original epoch origin paired with resourceLoad. */
     public long appStateStartTime;
+    public String frozenAppState = "unknown";
+    public String errorAppState = "unknown";
 
     /** Resource request start time, epoch nanoseconds. */
     public long startTime = Utils.getCurrentNanoTime();
@@ -265,7 +268,7 @@ public class ResourceBean {
      * Action name, {@link  ActionBean#actionName}
      */
     public String actionName;
-    public HashMap<String, Object> property = new HashMap<>();
+    public HashMap<String, Object> property = RUMCustomKeys.newMap();
 
     /**
      * Whether resource metrics are set

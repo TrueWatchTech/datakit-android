@@ -1,6 +1,7 @@
 package com.ft.sdk;
 
 import com.ft.sdk.garble.bean.*;
+import com.ft.sdk.internal.RUMCustomKeys;
 import com.ft.sdk.garble.db.FTDataStoreManager;
 import com.ft.sdk.garble.db.file.FTFileDataStore;
 import com.ft.sdk.garble.db.file.FTFileStorePaths;
@@ -55,10 +56,10 @@ public class RUMViewTimingIntegrationTest {
         com.ft.sdk.garble.db.FTDBCachePolicy.get().initRUMParam(new FTRUMConfig());
         SyncDataHelper helper = new SyncDataHelper() {
             @Override public String getBodyContent(String measurement, HashMap<String, Object> tags,
-                    HashMap<String, Object> fields, long time, DataType type, String uuid, String visitor) {
+                    HashMap<String, Object> fields, long time, DataType type, String uuid, String visitor, com.ft.sdk.internal.RUMCustomKeys customKeys) {
                 if ("view".equals(measurement)) views.put((String) tags.get("view_id"), new HashMap<>(fields));
                 return dropped.contains(measurement) ? "" : super.getBodyContent(measurement, tags, fields,
-                        time, type, uuid, visitor);
+                        time, type, uuid, visitor, customKeys);
             }
         };
         helper.initBaseConfig(FTSDKConfig.builder().setEnableDataFilter(false));
@@ -311,6 +312,9 @@ public class RUMViewTimingIntegrationTest {
         drain();
         Object original = views.get(target.getId()).get("interaction_to_next_view_time");
         assertNotNull(original);
+        // This test exercises retained timing values, not the wall-clock upload checkpoint.
+        // Closing in the same millisecond as the previous upload must still reach the probe.
+        store.updateViewUploadTime(target.getId(), 0);
         for (String name : new String[]{"third", "fourth", "fifth"}) {
             rum.startView(name);
             drain();
@@ -346,7 +350,7 @@ public class RUMViewTimingIntegrationTest {
         rum.startView("source");
         rum.addAction("first", "click", 0, Utils.getCurrentNanoTime());
         drain();
-        for (String type : new String[]{"tap", "swipe", "back", "custom"}) {
+        for (String type : new String[]{"tap", "swipe", "back", "custom", "launch_warm"}) {
             rum.addAction("later", type, 0, Utils.getCurrentNanoTime());
         }
         rum.startView("target");
@@ -463,6 +467,88 @@ public class RUMViewTimingIntegrationTest {
         drain();
         assertEquals(0, calls[0]);
         assertEquals(original, views.get(target.getId()).get("interaction_to_next_view_time"));
+    }
+
+    @Test public void customKeysFollowEachEventPropertyWithoutInheritingViewOrSiblingSources() throws Exception {
+        Map<String, Map<String, Object>> records = new HashMap<>();
+        FTTrackInner.getInstance().getCurrentDataHelper().lineDataModifier = (measurement, values) -> {
+            String name = "action".equals(measurement) ? values.get("action_name").toString() : measurement;
+            records.put(name, new HashMap<>(values));
+            return null;
+        };
+        rum.startView("source", property("view_start", true));
+        rum.addAction("A", "click", 0, Utils.getCurrentNanoTime(), property("biz_a", 1));
+        drain();
+        rum.startAction("B", "click", true, property("biz_b", false));
+        rum.stopAction();
+        drain();
+        rum.addError("stack", "message", "custom", AppState.RUN, property("error_biz", 2.5));
+        rum.addLongTask("stack", 10, property("task_biz", "value"));
+        drain();
+        rum.stopView(property("view_stop", false), null);
+        drain();
+        assertEquals(Collections.singleton("biz_a"), RUMCustomKeys.parse(records.get("A").get("custom_keys")));
+        assertEquals(Collections.singleton("biz_b"), RUMCustomKeys.parse(records.get("B").get("custom_keys")));
+        assertEquals(Collections.singleton("error_biz"), RUMCustomKeys.parse(records.get("error").get("custom_keys")));
+        assertEquals(Collections.singleton("task_biz"), RUMCustomKeys.parse(records.get("long_task").get("custom_keys")));
+        assertEquals(new HashSet<>(Arrays.asList("view_start", "view_stop")),
+                RUMCustomKeys.parse(records.get("view").get("custom_keys")));
+        assertEquals(1, records.get("A").get("biz_a"));
+        assertEquals(false, records.get("B").get("biz_b"));
+    }
+
+    @Test public void customKeysMergeAllResourceInputsButNotItsGeneratedNetworkError() throws Exception {
+        Map<String, Map<String, Object>> records = new HashMap<>();
+        FTTrackInner.getInstance().getCurrentDataHelper().lineDataModifier = (measurement, values) -> {
+            records.put(measurement, new HashMap<>(values));
+            return null;
+        };
+        rum.startView("source", property("view_biz", true));
+        rum.startResource("request", property("start_biz", 1));
+        rum.stopResource("request", property("stop_biz", false));
+        ResourceParams params = new ResourceParams();
+        params.url = "https://example.com/request";
+        params.resourceStatus = 500;
+        params.property = property("content_biz", 2.5);
+        rum.setTransformContent("request", params, false);
+        rum.putRUMResourcePerformance("request");
+        drain();
+        assertEquals(new HashSet<>(Arrays.asList("start_biz", "stop_biz", "content_biz")),
+                RUMCustomKeys.parse(records.get("resource").get("custom_keys")));
+        assertTrue(RUMCustomKeys.parse(records.get("error").get("custom_keys")).isEmpty());
+        assertFalse(records.get("error").containsKey("content_biz"));
+        assertEquals(2.5, records.get("resource").get("content_biz"));
+    }
+
+    @Test public void customKeysUseEventTimeUserExtensionsAcrossRebindRestoreAndUnbind() throws Exception {
+        FTRUMConfigManager manager = FTRUMConfigManager.get();
+        manager.bindUserData("first", "name", "email", stringProperty("first_ext", "one"));
+        HashMap<String, Object> first = manager.getRUMPublicDynamicTags();
+        // Simulate restoration from the persisted user, then replace that user.
+        field(FTRUMConfigManager.class, "mUserData").set(manager, null);
+        HashMap<String, Object> restored = manager.getRUMPublicDynamicTags();
+        manager.bindUserData("second", "name", "email", stringProperty("second_ext", "two"));
+        HashMap<String, Object> second = manager.getRUMPublicDynamicTags();
+        manager.unbindUserData();
+        HashMap<String, Object> unbound = manager.getRUMPublicDynamicTags();
+        List<Set<String>> lists = new ArrayList<>();
+        SyncDataHelper helper = FTTrackInner.getInstance().getCurrentDataHelper();
+        helper.lineDataModifier = (measurement, values) -> {
+            lists.add(RUMCustomKeys.parse(values.get("custom_keys")));
+            return null;
+        };
+        for (HashMap<String, Object> tags : Arrays.asList(first, restored, second, unbound)) {
+            helper.getBodyContent("error", tags, property("error_message", "test"), 1, DataType.RUM_APP, "uuid");
+        }
+        assertEquals(Arrays.asList(Collections.singleton("first_ext"), Collections.singleton("first_ext"),
+                Collections.singleton("second_ext"), Collections.emptySet()), lists);
+    }
+
+    private static HashMap<String, Object> property(String key, Object value) {
+        HashMap<String, Object> values = new HashMap<>(); values.put(key, value); return values;
+    }
+    private static HashMap<String, String> stringProperty(String key, String value) {
+        HashMap<String, String> values = new HashMap<>(); values.put(key, value); return values;
     }
 
     private void resource(String id, long start) {

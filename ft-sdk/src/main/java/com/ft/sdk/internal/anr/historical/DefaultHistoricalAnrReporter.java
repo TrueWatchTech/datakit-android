@@ -8,6 +8,7 @@ import com.ft.sdk.garble.bean.ErrorSource;
 import com.ft.sdk.garble.bean.ErrorType;
 import com.ft.sdk.garble.db.InsertResult;
 import com.ft.sdk.garble.utils.Constants;
+import com.ft.sdk.internal.RUMCustomKeys;
 
 import java.util.HashMap;
 
@@ -59,9 +60,9 @@ final class DefaultHistoricalAnrReporter implements HistoricalAnrReporter {
         if (context.getCollectType() == CollectType.NOT_COLLECT) {
             return ReportResult.ALREADY_EXISTS;
         }
-        AppState state = exit.getImportance() >= 400
-                ? AppState.BACKGROUND
-                : AppState.RUN;
+        // Exit importance describes process termination, not the blocking onset.
+        // Without an onset snapshot, do not label it as the Error's occurrence state.
+        AppState state = AppState.UNKNOWN;
         HashMap<String, Object> tags = new HashMap<>();
         tags.put(Constants.KEY_RUM_ERROR_TYPE, ErrorType.ANR_CRASH.toString());
         tags.put(Constants.KEY_RUM_ERROR_SOURCE, ErrorSource.LOGGER.toString());
@@ -71,7 +72,7 @@ final class DefaultHistoricalAnrReporter implements HistoricalAnrReporter {
         tags.put(Constants.KEY_RUM_VIEW_NAME, context.getViewName());
         tags.put("process_name", exit.getProcessName());
 
-        HashMap<String, Object> fields = new HashMap<>();
+        HashMap<String, Object> fields = RUMCustomKeys.newMap();
         fields.put(Constants.KEY_RUM_ERROR_MESSAGE, "android_anr");
         fields.put(Constants.KEY_RUM_ERROR_STACK, stack);
         fields.put("historical", true);

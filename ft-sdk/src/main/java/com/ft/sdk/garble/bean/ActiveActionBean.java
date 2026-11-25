@@ -72,6 +72,7 @@ public class ActiveActionBean extends ActionBean {
     public ActionBean convertToActionBean() {
         ActionBean bean = new ActionBean();
         bean.interactionStopTimeNano = this.interactionStopTimeNano;
+        bean.frozenAppState = this.frozenAppState;
         bean.id = this.id;
         bean.startTime = this.startTime;
         bean.startTimeNanoForDuration = this.startTimeNanoForDuration;

@@ -8,6 +8,7 @@ import com.ft.sdk.garble.bean.ResourceParams;
 import com.ft.sdk.garble.utils.Constants;
 import com.ft.sdk.garble.utils.LogUtils;
 import com.ft.sdk.garble.utils.Utils;
+import com.ft.sdk.internal.RUMCustomKeys;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
@@ -223,9 +224,9 @@ public class FTResourceInterceptor implements Interceptor {
             if (handlerHelper != null) {
                 if (extraData != null) {
                     if (params.property == null) {
-                        params.property = new HashMap<>();
+                        params.property = RUMCustomKeys.newMap();
                     }
-                    params.property.putAll(extraData);
+                    RUMCustomKeys.putUserProperties(params.property, extraData);
                 }
             }
 

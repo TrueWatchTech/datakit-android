@@ -30,7 +30,9 @@ import java.util.HashMap;
  * RUM, log, trace, or Session Replay with their corresponding configuration APIs.
  */
 public class FTSdk {
+    /** Logcat tag used by the SDK entry point. */
     public final static String TAG = Constants.LOG_TAG_PREFIX + "FTSdk";
+    /** Subdirectory of the application files directory used for native crash dumps. */
     public static final String NATIVE_DUMP_PATH = "ftCrashDmp";
     /**
      * Modified by Plugin ASM, writes the Plugin version number
@@ -104,6 +106,7 @@ public class FTSdk {
                 mFtSdk = new FTSdk(ftSDKConfig);
                 ftSDKConfig.isMainProcess = Utils.isMainProcess();
                 mFtSdk.initFTConfig(ftSDKConfig);
+                FTAutoTrack.restartLifecycleIfStopped();
             }
         } catch (Exception e) {
             LogUtils.e(TAG, "initFTConfig fail:\n" + LogUtils.getStackTraceString(e));
@@ -132,9 +135,11 @@ public class FTSdk {
     }
 
     /**
-     * Shutdown running objects within SDK
+     * Stops SDK collection and releases its workers and lifecycle listeners.
+     * To resume collection, install the SDK again and initialize the required features.
      */
     public static void shutDown() {
+        FTAutoTrack.stopLifecycle();
         FTVisitorIdManager.get().stop();
         FTURLConnectionResourceReporter.shutdown();
         SyncTaskManager.get().release();
@@ -213,8 +218,8 @@ public class FTSdk {
 
 
     /**
-     * Actively update remote configuration, call frequency is affected by the time of
-     * {@link FTSDKConfig#setRemoteConfigMiniUpdateInterval(int)} }
+     * Requests a remote configuration refresh using the minimum interval configured by
+     * {@link FTSDKConfig#setRemoteConfigMiniUpdateInterval(int)}. Requires remote configuration to be enabled.
      */
     public static void updateRemoteConfig() {
         if (checkInstallState()) {
@@ -225,11 +230,10 @@ public class FTSdk {
     }
 
     /**
-     * Actively update remote configuration, this method ignores
-     * {@link FTSDKConfig#setRemoteConfigMiniUpdateInterval(int)} } configuration
+     * Requests a remote configuration refresh with a minimum interval specific to this call.
      *
-     * @param remoteConfigMiniUpdateInterval Remote configuration time interval, unit seconds [0,]
-     * @param result                         Return update result
+     * @param remoteConfigMiniUpdateInterval minimum interval in seconds; zero skips the elapsed-time check
+     * @param result                         optional callback for this request; null uses the configured callback
      */
     public static void updateRemoteConfig(int remoteConfigMiniUpdateInterval, FTRemoteConfigManager.FetchResult result) {
         if (checkInstallState()) {
@@ -310,7 +314,8 @@ public class FTSdk {
     /**
      * Initializes Session Replay collection.
      *
-     * @param config Session Replay configuration object from the optional replay module
+     * @param config a {@code com.ft.sdk.sessionreplay.FTSessionReplayConfig} from the optional
+     *               Replay module; call after SDK installation and RUM initialization
      */
     public static void initSessionReplayConfig(Object config) {
         try {
@@ -324,9 +329,9 @@ public class FTSdk {
     }
 
     /**
-     * Bind user information, {@link Constants#KEY_RUM_IS_SIGN_IN}, after binding the field is T,
-     * bind once, the field data will continue to retain data until calling
-     * {@link #unbindRumUserData()}
+     * Binds a signed-in user ID for subsequent RUM events. This replaces any previously
+     * bound name, email and custom attributes. Use {@link #bindRumUserData(UserData)}
+     * to supply those fields together with the ID.
      *
      * @param id unique user id
      */
@@ -345,7 +350,7 @@ public class FTSdk {
     }
 
     /**
-     * Unbind user data {@link Constants#KEY_RUM_IS_SIGN_IN}, after binding the field is F
+     * Ends the current RUM user binding, for example when the user signs out.
      */
     public static void unbindRumUserData() {
         FTRUMConfigManager.get().unbindUserData();
@@ -383,7 +388,7 @@ public class FTSdk {
 
             HashMap<String, Object> hashMap = new HashMap<>();
             hashMap.put(Constants.KEY_DEVICE_UUID, uuid);
-            FTTrackInner.getInstance().appendGlobalContext(hashMap);
+            FTTrackInner.getInstance().appendInternalGlobalContext(hashMap);
         }
     }
 
@@ -401,6 +406,7 @@ public class FTSdk {
      * @param config base SDK configuration whose global context will be enriched
      */
     private void appendGlobalContext(FTSDKConfig config) {
+        config.captureUserGlobalContextKeys();
         HashMap<String, Object> hashMap = config.getGlobalContext();
         hashMap.put(Constants.KEY_APP_VERSION_NAME, Utils.getAppVersionName());
         hashMap.put(Constants.KEY_SDK_NAME, Constants.SDK_NAME);
@@ -433,7 +439,9 @@ public class FTSdk {
     }
 
     /**
-     * Dynamically set global tag
+     * Appends a snapshot of the supplied global attributes. If copying detects a concurrent
+     * modification, the entire batch is skipped. Successful calls write values changed by
+     * {@link DataModifier} back to the supplied map.
      *
      * @param globalContext global attributes appended to all data types
      */
@@ -456,7 +464,9 @@ public class FTSdk {
     }
 
     /**
-     * Dynamically set RUM global tag
+     * Appends a snapshot of the supplied RUM attributes. If copying detects a concurrent
+     * modification, the entire batch is skipped. Successful calls write values changed by
+     * {@link DataModifier} back to the supplied map.
      *
      * @param globalContext attributes appended only to RUM data
      */
@@ -515,7 +525,8 @@ public class FTSdk {
 
 
     /**
-     * Actively sync data
+     * Schedules an asynchronous upload of cached Log and RUM data after installation,
+     * including when automatic sync is disabled. Returning from this call does not confirm delivery.
      */
     public static void flushSyncData() {
         if (checkInstallState()) {

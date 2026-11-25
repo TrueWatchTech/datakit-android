@@ -33,7 +33,9 @@ public class FTMonitorManagerTest {
         LogUtils.setDebug(false);
         setStatic(FTApplication.class, "instance", RuntimeEnvironment.getApplication());
         FTMonitorManager.release();
-        setStatic(FTActivityLifecycleCallbacks.class, "activityCount", 1);
+        FTAppStateMonitor monitor = FTAppStartCounter.get().appStateMonitor;
+        monitor.stop();
+        org.powermock.reflect.Whitebox.setInternalState(monitor, "visibility", "foreground");
         manager = FTMonitorManager.get();
         manager.initWithConfig(new FTRUMConfig().setDeviceMetricsMonitorTypes(
                 DetectFrequency.RARE, DeviceMetricsMonitorType.CPU));
@@ -45,7 +47,7 @@ public class FTMonitorManagerTest {
         FTMonitorManager.release();
         service.shutdownNow();
         Assert.assertTrue(service.awaitTermination(2, TimeUnit.SECONDS));
-        setStatic(FTActivityLifecycleCallbacks.class, "activityCount", 0);
+        FTAppStartCounter.get().appStateMonitor.stop();
     }
 
     @Test

@@ -6,6 +6,7 @@ import com.ft.sdk.FTRUMInnerManager;
 import com.ft.sdk.garble.utils.Constants;
 import com.ft.sdk.garble.utils.LogUtils;
 import com.ft.sdk.garble.utils.Utils;
+import com.ft.sdk.internal.RUMCustomKeys;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -186,20 +187,20 @@ public class ViewBean {
     /**
      * Page additional properties, {@link  Constants#KEY_RUM_SDK_INNER_KEY_PROPERTY}
      */
-    HashMap<String, Object> property = new HashMap<>();
+    HashMap<String, Object> property = RUMCustomKeys.newMap();
 
     public HashMap<String, Object> getProperty() {
         return property;
     }
 
-    HashMap<String, Object> tags = new HashMap<>();
+    HashMap<String, Object> tags = RUMCustomKeys.newMap();
 
     public HashMap<String, Object> getTags() {
         return tags;
     }
 
     public void setTags(HashMap<String, Object> tags) {
-        this.tags = tags;
+        this.tags = RUMCustomKeys.copy(tags);
     }
 
     public String getViewReferrer() {
@@ -446,6 +447,7 @@ public class ViewBean {
      */
     public String getAttrJsonString() {
         HashMap<String, Object> map = new HashMap<>();
+        map.put(RUMCustomKeys.CACHE_KEY, RUMCustomKeys.cache(tags, property));
         if (networkSettledTime != null) map.put(Constants.KEY_RUM_VIEW_NETWORK_SETTLED_TIME, networkSettledTime);
         if (interactionToNextViewTime != null) map.put(Constants.KEY_RUM_VIEW_INTERACTION_TO_NEXT_VIEW_TIME, interactionToNextViewTime);
         map.put(Constants.KEY_RUM_SDK_INNER_KEY_COLLECT_TYPE, collectType);
@@ -478,6 +480,7 @@ public class ViewBean {
     public void setFromAttrJsonString(String jsonString) {
         try {
             JSONObject json = new JSONObject(jsonString);
+            RUMCustomKeys.restore(json.optJSONObject(RUMCustomKeys.CACHE_KEY), tags, property);
             networkSettledTime = !json.isNull(Constants.KEY_RUM_VIEW_NETWORK_SETTLED_TIME)
                     ? json.getLong(Constants.KEY_RUM_VIEW_NETWORK_SETTLED_TIME) : null;
             interactionToNextViewTime = !json.isNull(Constants.KEY_RUM_VIEW_INTERACTION_TO_NEXT_VIEW_TIME)

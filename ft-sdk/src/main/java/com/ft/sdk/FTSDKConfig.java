@@ -4,6 +4,7 @@ import androidx.annotation.NonNull;
 
 import com.ft.sdk.garble.utils.Constants;
 import com.ft.sdk.garble.utils.LogUtils;
+import com.ft.sdk.internal.RUMCustomKeys;
 
 import java.net.Proxy;
 import java.util.Arrays;
@@ -12,7 +13,8 @@ import java.util.HashMap;
 /**
  * BY huangDianHua
  * DATE:2019-12-06 11:40
- * Description:
+ * Base configuration for {@link FTSdk#install(FTSDKConfig)}, including the upload endpoint,
+ * local cache and synchronization settings.
  */
 public class FTSDKConfig {
     private static final String TAG = Constants.LOG_TAG_PREFIX + "FTSDKConfig";
@@ -64,7 +66,8 @@ public class FTSDKConfig {
     private CacheDiscard cacheDiscard = CacheDiscard.DISCARD;
 
     /**
-     * Set log level, default {@link SDKLogLevel#V}
+     * Sets the minimum severity of SDK debug output when {@link #setDebug(boolean)} is enabled.
+     * The initial threshold is {@link SDKLogLevel#V}.
      *
      * @param logLevel SDK internal log level
      * @return this config for chaining
@@ -382,6 +385,11 @@ public class FTSDKConfig {
      * or user-defined variable parameters added via {@link FTSDKConfig#addGlobalContext(String, String)}
      */
     private final HashMap<String, Object> globalContext = new HashMap<>();
+    java.util.Set<String> userGlobalContextKeys;
+
+    void captureUserGlobalContextKeys() {
+        userGlobalContextKeys = RUMCustomKeys.userKeys(globalContext);
+    }
 
     private final HashMap<String, String> pkgInfo = new HashMap<>();
 
@@ -549,7 +557,8 @@ public class FTSDKConfig {
     }
 
     /**
-     * Set data sync size
+     * Selects the number of Log or RUM records per upload request (default: {@link SyncPageSize#MEDIUM}).
+     * This and {@link #setCustomSyncPageSize(int)} set the same limit.
      *
      * @param pageSize predefined number of rows uploaded per request
      * @return this config for chaining
@@ -560,7 +569,8 @@ public class FTSDKConfig {
     }
 
     /**
-     * Custom data sync size
+     * Sets a custom upload batch size. Values below five are rounded up to five.
+     * The most recent call to this method or {@link #setSyncPageSize(SyncPageSize)} wins.
      *
      * @param pageSize custom number of rows uploaded per request
      * @return this config for chaining
@@ -697,9 +707,10 @@ public class FTSDKConfig {
     }
 
     /**
-     * Set the maximum sync retry count, minimum 0, maximum 5, 0 means no retry
+     * Sets the retry limit for each data type during a Log or RUM upload round.
+     * Zero ends that type's round at the first retryable failure; cached data remains eligible for a later round.
      *
-     * @param dataSyncRetryCount retry count
+     * @param dataSyncRetryCount retry count, clamped to 0–5 (default 5)
      * @return this config for chaining
      */
     public FTSDKConfig setDataSyncRetryCount(int dataSyncRetryCount) {
@@ -845,9 +856,9 @@ public class FTSDKConfig {
     }
 
     /**
-     * Set the interval time for each sync, sleep time between [0,5000]，0 default
+     * Sets the pause between successive upload pages in a synchronization round.
      *
-     * @param sleepTimeMs Data sync interval time
+     * @param sleepTimeMs delay in milliseconds, clamped to 0–5000 (default 0)
      * @return this config for chaining
      */
     public FTSDKConfig setSyncSleepTime(int sleepTimeMs) {

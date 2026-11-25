@@ -1,16 +1,17 @@
 package com.ft.sdk;
 
 /**
- * In the automatic buried point function, filter the addresses that do not need to be collected, generally used to exclude some requests that are not related to business
+ * Filters URLs for automatic RUM resource collection. Configure with
+ * {@link FTRUMConfig#setResourceUrlHandler(FTInTakeUrlHandler)}.
  *
  * @author Brandon
  */
 public interface FTInTakeUrlHandler {
     /**
-     * Whether to collect this address data
+     * Checks whether to exclude a request URL.
      *
-     * @param url url address, example url="https://www.truewatch.com/"
-     * @return true not collect, false collect
+     * @param url full URL of the request
+     * @return true to exclude this URL; false to allow normal collection
      */
     boolean isInTakeUrl(String url);
 }

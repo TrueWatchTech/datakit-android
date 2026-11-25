@@ -30,33 +30,7 @@ public class NativeEngineInit {
      */
     public static void init(Context context, String logPath, boolean enableNativeCrash, boolean enableAnrHandler,
                             CrashCallback nativeCrashCallback) {
-        NativeCrash.InitParameters parameters = new NativeCrash.InitParameters()
-                .setNativeRethrow(true)
-                .setNativeLogCountMax(10)
-                .setNativeDumpAllThreadsCountMax(10)
-                .setNativeCallback(new ftnative.CrashCallback() {
-                    @Override
-                    public void onCrash(String crashPath, String s) {
-                        if (nativeCrashCallback != null) {
-                            nativeCrashCallback.onCrash(crashPath);
-                        }
-                    }
-                })
-                .setPlaceholderCountMax(3)
-                .setAnrRethrow(true)
-                .setAnrLogCountMax(10)
-                .setPlaceholderSizeKb(512)
-                .setLogDir(logPath)
-                .setLogFileMaintainDelayMs(1000);
-        if (!enableAnrHandler) {
-            parameters.disableAnrCrashHandler();
-        }
-
-        if (!enableNativeCrash) {
-            parameters.disableNativeCrashHandler();
-        }
-
-        NativeCrash.init(context, parameters);
+        init(context, logPath, enableNativeCrash, enableAnrHandler, nativeCrashCallback, null, null);
     }
 
 
@@ -75,6 +49,14 @@ public class NativeEngineInit {
                             CrashCallback nativeCrashCallback,
                             NativeExtraLogCatSetting nativeCrashLogCatSetting,
                             NativeExtraLogCatSetting anrCrashLogCatSetting) {
+        init(context, logPath, enableNativeCrash, enableAnrHandler, nativeCrashCallback,
+                nativeCrashLogCatSetting, anrCrashLogCatSetting, null);
+    }
+
+    /** Keeps report files in logPath and optionally preallocates reusable files in placeholderDir. */
+    public static void init(Context context, String logPath, boolean enableNativeCrash, boolean enableAnrHandler,
+                            CrashCallback nativeCrashCallback, NativeExtraLogCatSetting nativeCrashLogCatSetting,
+                            NativeExtraLogCatSetting anrCrashLogCatSetting, String placeholderDir) {
         NativeCrash.InitParameters parameters = new NativeCrash.InitParameters()
                 .setNativeRethrow(true)
                 .setNativeLogCountMax(10)
@@ -92,6 +74,7 @@ public class NativeEngineInit {
                 .setAnrLogCountMax(10)
                 .setPlaceholderSizeKb(512)
                 .setLogDir(logPath)
+                .setPlaceholderDir(placeholderDir)
                 .setLogFileMaintainDelayMs(1000);
         if (!enableAnrHandler) {
             parameters.disableAnrCrashHandler();

@@ -27,7 +27,9 @@ public enum Status {
      * Critical
      */
     CRITICAL("critical"),
-    OK("ok");// Recovery
+    /** Recovery or healthy status. */
+    OK("ok");
+    /** Wire value used for log filtering and the reported status field. */
     public String name;
 
     Status(String name) {

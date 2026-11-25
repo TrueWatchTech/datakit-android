@@ -30,21 +30,15 @@ public enum DeviceMetricsMonitorType {
 
 
     /**
-     * All types {@link #BATTERY,#MEMORY,#CPU,#FPS}
+     * All View metrics: {@link #BATTERY}, {@link #MEMORY}, {@link #CPU} and {@link #FPS}.
      */
     ALL(0xFFFFFFFF),
     /**
-     * Battery current remaining, TV devices do not support
-     * {@link Constants#KEY_BATTERY_CURRENT_AVG,
-     *
-     * @link Constants#KEY_BATTERY_CURRENT_MAX}
+     * Battery current (on supported devices), reported as {@link Constants#KEY_BATTERY_CURRENT_AVG} and {@link Constants#KEY_BATTERY_CURRENT_MAX}.
      */
     BATTERY(1 << 1),
     /**
-     * Device memory usage
-     * {@link Constants#KEY_MEMORY_AVG,
-     *
-     * @link Constants#KEY_MEMORY_MAX }
+     * Memory usage, reported as {@link Constants#KEY_MEMORY_AVG} and {@link Constants#KEY_MEMORY_MAX}.
      */
     MEMORY(1 << 2),
     /**
@@ -54,10 +48,7 @@ public enum DeviceMetricsMonitorType {
      */
     CPU(1 << 3),
     /**
-     * Frame number
-     * {@link Constants#KEY_FPS_AVG,
-     *
-     * @link Constants#KEY_FPS_MINI }
+     * Frame rate, reported as {@link Constants#KEY_FPS_AVG} and {@link Constants#KEY_FPS_MINI}.
      */
     FPS(1 << 4);
     private final int value;

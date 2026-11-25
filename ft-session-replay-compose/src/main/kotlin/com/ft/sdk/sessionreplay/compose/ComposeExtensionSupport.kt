@@ -27,8 +27,8 @@ import com.ft.sdk.sessionreplay.utils.ViewIdentifierResolver
 import java.util.Collections
 
 /**
- * Jetpack Compose extension support implementation to be used in the Session Replay
- * configuration.
+ * Records Compose content from its semantics tree. Register this extension on the Replay
+ * configuration with `addExtensionSupport(ComposeExtensionSupport())` before initialization.
  */
 class ComposeExtensionSupport : ExtensionSupport {
 

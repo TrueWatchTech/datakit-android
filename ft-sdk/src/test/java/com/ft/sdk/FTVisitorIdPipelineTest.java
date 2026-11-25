@@ -31,8 +31,8 @@ public class FTVisitorIdPipelineTest {
         LinkedBlockingQueue<String> lines = new LinkedBlockingQueue<>();
         SyncDataHelper helper = new SyncDataHelper() {
             @Override public String getBodyContent(String measurement, HashMap<String, Object> tags,
-                    HashMap<String, Object> fields, long time, DataType type, String uuid, String visitorId) {
-                lines.add(super.getBodyContent(measurement, tags, fields, time, type, uuid, visitorId));
+                    HashMap<String, Object> fields, long time, DataType type, String uuid, String visitorId, com.ft.sdk.internal.RUMCustomKeys customKeys) {
+                lines.add(super.getBodyContent(measurement, tags, fields, time, type, uuid, visitorId, customKeys));
                 // Exercise real queue, SyncData and serialization; discard before database/network work.
                 return "";
             }

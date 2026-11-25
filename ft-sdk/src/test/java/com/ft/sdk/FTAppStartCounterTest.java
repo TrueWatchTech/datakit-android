@@ -26,7 +26,9 @@ import org.robolectric.android.controller.ActivityController;
 import org.robolectric.shadows.ShadowActivityManager;
 
 import java.lang.reflect.Constructor;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -36,6 +38,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class FTAppStartCounterTest {
 
     private long originalAppStartTime;
+    private final List<FTAppStartCounter> counters = new ArrayList<>();
 
     @Before
     public void saveAppStartTime() {
@@ -44,6 +47,9 @@ public class FTAppStartCounterTest {
 
     @After
     public void restoreAppStartTime() {
+        for (FTAppStartCounter counter : counters) {
+            counter.appStateMonitor.stop();
+        }
         FTApplication.APP_START_TIME = originalAppStartTime;
     }
 
@@ -59,6 +65,7 @@ public class FTAppStartCounterTest {
         FTAppStartCounter counter = newCounter();
         Application application = RuntimeEnvironment.getApplication();
         counter.appOnCreate(processStart, application);
+        setCurrentProcessImportance(ActivityManager.RunningAppProcessInfo.IMPORTANCE_SERVICE);
         counter.appOnCreateCompleted(processStart + TimeUnit.MILLISECONDS.toNanos(100));
         counter.checkFirstActivityPreCreate(
                 processStart + TimeUnit.HOURS.toNanos(2)
@@ -76,7 +83,7 @@ public class FTAppStartCounterTest {
     }
 
     @Test
-    public void slowApplicationInitializationRemainsForegroundLaunch() throws Exception {
+    public void slowApplicationInitializationRebasesWarmWithoutInventingBackground() throws Exception {
         setCurrentProcessImportance(
                 ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND);
 
@@ -98,10 +105,11 @@ public class FTAppStartCounterTest {
                 Whitebox.getInternalState(counter, "launchFromBackground");
 
         Assert.assertFalse(launchFromBackground);
+        Assert.assertTrue((boolean) Whitebox.getInternalState(counter, "firstLaunchWarm"));
     }
 
     @Test
-    public void activityAfterFirstMainLoopIsBackgroundEvenWhenGapIsShort() throws Exception {
+    public void backgroundProcessBeforeFirstActivityIsBackgroundEvenWhenGapIsShort() throws Exception {
         setCurrentProcessImportance(
                 ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND);
 
@@ -111,6 +119,7 @@ public class FTAppStartCounterTest {
         FTAppStartCounter counter = newCounter();
         Application application = RuntimeEnvironment.getApplication();
         counter.appOnCreate(processStart, application);
+        setCurrentProcessImportance(ActivityManager.RunningAppProcessInfo.IMPORTANCE_SERVICE);
         counter.appOnCreateCompleted(processStart + TimeUnit.MILLISECONDS.toNanos(100));
         counter.checkFirstActivityPreCreate(processStart + TimeUnit.MILLISECONDS.toNanos(200));
 
@@ -194,8 +203,10 @@ public class FTAppStartCounterTest {
             FTAppStartCounter counter = newCounter();
             Application application = RuntimeEnvironment.getApplication();
             counter.appOnCreate(firstAppOnCreate, application);
+            setCurrentProcessImportance(ActivityManager.RunningAppProcessInfo.IMPORTANCE_SERVICE);
             counter.appOnCreateCompleted(processStart + TimeUnit.MILLISECONDS.toNanos(100));
 
+            setCurrentProcessImportance(ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND);
             counter.appOnCreate(processStart + duration - TimeUnit.SECONDS.toNanos(1),
                     application);
             counter.checkFirstActivityPreCreate(
@@ -214,8 +225,10 @@ public class FTAppStartCounterTest {
 
             Assert.assertTrue(launchFromBackground);
             Assert.assertEquals(firstAppOnCreate, applicationOnCreateTimeLine);
-            Assert.assertEquals(preApplicationDuration, applicationPreOnCreateDuration);
-            Assert.assertEquals(duration, coldStartDuration);
+            // API 23 has no reliable process origin for a pre-Application breakdown.
+            Assert.assertEquals(0L, applicationPreOnCreateDuration);
+            Assert.assertEquals(TimeUnit.MILLISECONDS.toNanos(100), coldStartDuration);
+            Assert.assertTrue((boolean) Whitebox.getInternalState(counter, "firstLaunchWarm"));
         } finally {
             FTApplication.APP_START_TIME = originalAppStartTime;
         }
@@ -274,7 +287,7 @@ public class FTAppStartCounterTest {
     }
 
     @Test
-    public void backgroundThenForegroundLaunchKeepsBackgroundTypeAndDuration() throws Exception {
+    public void backgroundThenForegroundLaunchRetainsOriginButRebasesWarmDuration() throws Exception {
         setCurrentProcessImportance(
                 ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE);
         long duration = TimeUnit.HOURS.toNanos(2);
@@ -290,17 +303,19 @@ public class FTAppStartCounterTest {
         Assert.assertEquals(Constants.APP_LAUNCH_TYPE_BACKGROUND,
                 counter.getColdStartLaunchType());
         long coldStartDuration = Whitebox.getInternalState(counter, "coldStartDuration");
-        Assert.assertEquals(duration, coldStartDuration);
+        Assert.assertEquals(TimeUnit.SECONDS.toNanos(1), coldStartDuration);
+        Assert.assertTrue((boolean) Whitebox.getInternalState(counter, "firstLaunchWarm"));
     }
 
     @Test
-    public void noActivityCorrectionKeepsBackgroundTypeAfterForeground()
+    public void backgroundProcessCorrectionKeepsBackgroundTypeAfterForeground()
             throws Exception {
         setCurrentProcessImportance(
                 ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND);
         FTAppStartCounter counter = newCounter();
         long applicationStart = System.nanoTime();
         counter.appOnCreate(applicationStart, RuntimeEnvironment.getApplication());
+        setCurrentProcessImportance(ActivityManager.RunningAppProcessInfo.IMPORTANCE_SERVICE);
         counter.appOnCreateCompleted(applicationStart + TimeUnit.MILLISECONDS.toNanos(100));
 
         Assert.assertEquals(Constants.APP_LAUNCH_TYPE_BACKGROUND,
@@ -583,6 +598,8 @@ public class FTAppStartCounterTest {
         Constructor<FTAppStartCounter> constructor =
                 FTAppStartCounter.class.getDeclaredConstructor();
         constructor.setAccessible(true);
-        return constructor.newInstance();
+        FTAppStartCounter counter = constructor.newInstance();
+        counters.add(counter);
+        return counter;
     }
 }

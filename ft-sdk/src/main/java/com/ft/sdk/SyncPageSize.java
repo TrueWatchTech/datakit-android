@@ -26,6 +26,7 @@ public enum SyncPageSize {
         this.value = value;
     }
 
+    /** Returns the number of records per upload request for this preset. */
     public int getValue() {
         return value;
     }

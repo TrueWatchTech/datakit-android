@@ -5,6 +5,7 @@ import com.ft.sdk.garble.threadpool.*;
 import com.ft.sdk.garble.utils.Constants;
 import com.ft.sdk.garble.utils.LogUtils;
 import com.ft.sdk.garble.utils.Utils;
+import com.ft.sdk.internal.issue.FTIssueFieldEnricher;
 import org.junit.*;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
@@ -27,6 +28,7 @@ public class RUMIntervalFieldsTest {
     private Object oldEventExecutor;
     private Object oldDataExecutor;
     private ThreadPoolExecutor eventExecutor;
+    private final List<Runnable> queuedEvents = new ArrayList<>();
     private ThreadPoolExecutor dataExecutor;
     private final Map<String, HashMap<String, Object>> fields = new HashMap<>();
     private final Map<String, HashMap<String, Object>> tags = new HashMap<>();
@@ -48,11 +50,11 @@ public class RUMIntervalFieldsTest {
         oldDataExecutor = replace(BaseThreadPool.class, DataProcessThreadPool.get(), "executor", dataExecutor);
         SyncDataHelper helper = new SyncDataHelper() {
             @Override public String getBodyContent(String measurement, HashMap<String, Object> eventTags,
-                    HashMap<String, Object> eventFields, long time, DataType type, String uuid, String visitor) {
+                    HashMap<String, Object> eventFields, long time, DataType type, String uuid, String visitor, com.ft.sdk.internal.RUMCustomKeys customKeys) {
                 fields.put(measurement, new HashMap<>(eventFields));
                 tags.put(measurement, new HashMap<>(eventTags));
                 lines.put(measurement, super.getBodyContent(measurement, eventTags, eventFields,
-                        time, type, uuid, visitor));
+                        time, type, uuid, visitor, customKeys));
                 return "";
             }
         };
@@ -297,6 +299,9 @@ public class RUMIntervalFieldsTest {
         rum.setNetState("request", network);
         resource.url = "https://example.com/path";
         resource.resourceStatus = 500;
+        // Completion was background; delayed serialization happens after foreground return.
+        advanceTo(clock.now + 100);
+        history.record("foreground");
         rum.forceRefreshSessionId();
         rum.putRUMResourcePerformance("request");
         assertEquals("foreground_and_background", fields.get("resource").get("app_state"));
@@ -305,6 +310,8 @@ public class RUMIntervalFieldsTest {
         assertEquals(sessionId, tags.get("error").get("session_id"));
         assertEquals("sdk_init", fields.get("error").get("session_start_reason"));
         assertFalse(fields.get("error").containsKey("app_state"));
+        assertFalse(tags.get("error").containsKey("app_state"));
+        assertEquals("background", tags.get("error").get("error_situation"));
         assertTrue(tags.get("error").containsKey("error_situation"));
         assertTrue(lines.get("resource").contains("app_state=\"foreground_and_background\""));
         assertTrue(lines.get("resource").contains("session_start_reason=\"sdk_init\""));
@@ -384,7 +391,29 @@ public class RUMIntervalFieldsTest {
         assertEquals("foreground", rum.viewAppState(view, 300));
     }
 
-    @Test public void queuedActionKeepsItsSessionReasonAndDoesNotAcquireIntervalState() throws Exception {
+    @Test public void completedActionFreezesIntervalBeforeDelayedSerialization() throws Exception {
+        rum.startView("screen");
+        advanceTo(200);
+        history.record("background");
+        advanceTo(300);
+        queuedEvents.clear();
+        rum.addAction("finished", "custom", 200, 100);
+        // View-counter maintenance is queued before the Action write.
+        Runnable write = queuedEvents.get(queuedEvents.size() - 1);
+        advanceTo(400);
+        history.record("foreground");
+        write.run();
+        assertEquals("foreground_and_background", fields.get("action").get("app_state"));
+        assertEquals("foreground", history.at(clock.now));
+
+        ActiveActionBean original = new ActiveActionBean("test", "custom", "session", "view", "screen", "root", false);
+        original.frozenAppState = "foreground_and_background";
+        ActionBean restored = new ActionBean();
+        restored.setFromAttrJsonString(original.convertToActionBean().getAttrJsonString());
+        assertEquals(original.frozenAppState, restored.frozenAppState);
+    }
+
+    @Test public void queuedActionKeepsSessionReasonAndUnknownWhenIntervalWasNotCaptured() throws Exception {
         rum.startView("screen");
         rum.startAction("tap", "click");
         Field activeAction = FTRUMInnerManager.class.getDeclaredField("activeAction");
@@ -398,7 +427,243 @@ public class RUMIntervalFieldsTest {
         insert.invoke(rum, old);
         assertEquals(originalSession, tags.get("action").get("session_id"));
         assertEquals("sdk_init", fields.get("action").get("session_start_reason"));
-        assertFalse(fields.get("action").containsKey("app_state"));
+        assertEquals("unknown", fields.get("action").get("app_state"));
+    }
+
+    @Test public void warmLaunchUsesLaunchViewAndSerializesOnlyItsRebasedInterval() throws Exception {
+        Field configField = FTRUMConfigManager.class.getDeclaredField("config");
+        configField.setAccessible(true);
+        Object oldConfig = configField.get(FTRUMConfigManager.get());
+        FTRUMConfig config = new FTRUMConfig().setRumAppId("warm-test");
+        FTRUMInnerManager shared = FTRUMInnerManager.get();
+        try {
+            for (boolean customHandler : new boolean[]{false, true}) {
+                config.setActionTrackingHandler(customHandler ? event -> {
+                    assertEquals(ActionSourceType.LAUNCH_WARM, event.getSourceType());
+                    return new HandlerAction("custom warm");
+                } : null);
+                configField.set(FTRUMConfigManager.get(), config);
+                shared.initParams(config);
+                queuedEvents.clear();
+                FTAutoTrack.putRUMWarmLaunchPerformance(200, 100);
+                queuedEvents.get(queuedEvents.size() - 1).run();
+                assertEquals(Constants.ACTION_TYPE_LAUNCH_WARM, tags.get("action").get("action_type"));
+                assertEquals(customHandler ? "custom warm" : Constants.ACTION_NAME_LAUNCH_WARM,
+                        tags.get("action").get("action_name"));
+                assertEquals(Constants.VIEW_NAME_APPLICATION_LAUNCH, tags.get("action").get("view_name"));
+                assertEquals(200L, fields.get("action").get("duration"));
+                assertEquals("foreground", fields.get("action").get("app_state"));
+                for (String key : new String[]{"app_launch_type", "app_pre_application_init_time",
+                        "app_application_init_time", "app_first_frame_init_time"}) {
+                    assertFalse(fields.get("action").containsKey(key));
+                    assertFalse(tags.get("action").containsKey(key));
+                }
+            }
+        } finally {
+            shared.release();
+            configField.set(FTRUMConfigManager.get(), oldConfig);
+        }
+    }
+
+    @Test public void queuedAutomaticCrashKeepsEventStateWithoutRewindingCurrentState() throws Exception {
+        assertAutomaticCrashState(false);
+    }
+
+    @Test public void historicalCrashDoesNotResetCurrentProcessStateOrCrashFreeCounters() throws Exception {
+        assertAutomaticCrashState(true);
+    }
+
+    @Test public void looperLongTaskRequiresEligibleOnsetAndForegroundCompletion() throws Exception {
+        FTUIBlockManager block = FTUIBlockManager.get();
+        FTAppStateMonitor monitor = FTAppStartCounter.get().appStateMonitor;
+        Object oldVisibility = replace(FTAppStateMonitor.class, monitor, "visibility", "foreground");
+        Object oldThreshold = replace(FTUIBlockManager.class, block, "blockDurationNS", 100_000_000L);
+        FTRUMInnerManager singleton = FTRUMInnerManager.get();
+        singleton.initParams(new FTRUMConfig());
+        try {
+            // Reuse the same Printer: each dispatch must take a fresh onset snapshot.
+            for (boolean[] states : new boolean[][]{
+                    {false, false}, {false, true}, {true, false}, {true, true}, {false, true}, {true, true}}) {
+                fields.remove("long_task");
+                if (states[0]) FTActivityManager.get().appForeground();
+                else FTActivityManager.get().appBackGround();
+                replace(FTAppStateMonitor.class, monitor, "visibility", states[0] ? "foreground" : "background");
+                block.printer.println(">>>>> Dispatching to test");
+                // Advance the measured duration without blocking the test main thread.
+                replace(FTUIBlockManager.class, block, "startTime", System.nanoTime() - 700_000_000L);
+                if (states[1]) FTActivityManager.get().appForeground();
+                else FTActivityManager.get().appBackGround();
+                replace(FTAppStateMonitor.class, monitor, "visibility", states[1] ? "foreground" : "background");
+                block.printer.println("<<<<< Finished to test");
+                assertEquals("onset=" + states[0] + ", completion=" + states[1],
+                        states[0] && states[1], fields.containsKey("long_task"));
+            }
+        } finally {
+            singleton.release();
+            replace(FTAppStateMonitor.class, monitor, "visibility", oldVisibility);
+            replace(FTUIBlockManager.class, block, "blockDurationNS", oldThreshold);
+        }
+    }
+
+    @Test public void backgroundWatchdogIsDroppedEvenWithSyntheticBackgroundView() throws Exception {
+        int[] providerCalls = {0};
+        replace(FTRUMInnerManager.class, rum, "issueFieldEnricher", new FTIssueFieldEnricher(issue -> {
+            providerCalls[0]++;
+            return null;
+        }));
+        FTActivityManager manager = FTActivityManager.get();
+        manager.appForeground();
+        rum.startAutomaticView(new Object(), "screen", null);
+        manager.appBackGround();
+        rum.onAppBackground();
+        assertTrue(active().isClose());
+        Field synthetic = FTRUMInnerManager.class.getDeclaredField("syntheticViewMap");
+        synthetic.setAccessible(true);
+        assertTrue(((Map<?, ?>) synthetic.get(rum)).containsKey(Constants.VIEW_NAME_BACKGROUND));
+        String session = rum.getCurrentViewSession().get(Constants.KEY_RUM_SESSION_ID).toString();
+        int[] completions = {0};
+        runQueuedEvents(() -> rum.addAutomaticIssue("stack", "anr", Utils.getCurrentNanoTime(),
+                FTIssueCategory.ANR, ErrorType.ANR_ERROR.toString(), AppState.RUN,
+                false, "main", null, () -> completions[0]++));
+        assertEquals(0, providerCalls[0]);
+        assertEquals(1, completions[0]);
+        assertFalse(tags.containsKey("error"));
+        assertEquals(session, rum.getCurrentViewSession().get(Constants.KEY_RUM_SESSION_ID));
+    }
+
+    @Test public void backgroundWatchdogWithoutAnyViewIsDropped() throws Exception {
+        FTActivityManager.get().appBackGround();
+        int[] completions = {0};
+        runQueuedEvents(() -> rum.addAutomaticIssue("stack", "anr", Utils.getCurrentNanoTime(),
+                FTIssueCategory.ANR, ErrorType.ANR_ERROR.toString(), AppState.BACKGROUND,
+                false, "main", null, () -> completions[0]++));
+        assertEquals(1, completions[0]);
+        assertFalse(tags.containsKey("error"));
+    }
+
+    @Test public void activeManualViewDoesNotBypassBackgroundOnsetFilter() throws Exception {
+        FTActivityManager.get().appForeground();
+        rum.startView("manual-screen");
+        String viewId = active().getId();
+        FTActivityManager.get().appBackGround();
+        rum.onAppBackground();
+        assertFalse(active().isClose());
+        runQueuedEvents(() -> reportWatchdog(AppState.BACKGROUND));
+        assertFalse(tags.containsKey("error"));
+        assertEquals(viewId, active().getId());
+    }
+
+    @Test public void foregroundReturnDropsBackgroundOnsetWatchdog() throws Exception {
+        FTActivityManager.get().appBackGround();
+        FTActivityManager.get().appForeground();
+        rum.startView("returned-screen");
+        String viewId = active().getId();
+        int[] providerCalls = {0};
+        int[] completions = {0};
+        replace(FTRUMInnerManager.class, rum, "issueFieldEnricher", new FTIssueFieldEnricher(issue -> {
+            providerCalls[0]++;
+            return null;
+        }));
+        runQueuedEvents(() -> rum.addAutomaticIssue("stack", "anr", Utils.getCurrentNanoTime(),
+                FTIssueCategory.ANR, ErrorType.ANR_ERROR.toString(), AppState.BACKGROUND,
+                false, "main", null, () -> completions[0]++));
+        assertFalse(tags.containsKey("error"));
+        assertEquals(viewId, active().getId());
+        assertEquals(0, providerCalls[0]);
+        assertEquals(1, completions[0]);
+        runQueuedEvents(() -> reportWatchdog(AppState.RUN));
+        assertEquals("run", tags.get("error").get(Constants.KEY_RUM_ERROR_SITUATION));
+        assertEquals(viewId, tags.get("error").get(Constants.KEY_RUM_VIEW_ID));
+    }
+
+    @Test public void startupWatchdogStillUsesLaunchContext() throws Exception {
+        assertEquals(AppState.STARTUP, FTActivityManager.get().getAppState());
+        runQueuedEvents(() -> reportWatchdog(AppState.STARTUP));
+        assertEquals(Constants.VIEW_NAME_APPLICATION_LAUNCH,
+                tags.get("error").get(Constants.KEY_RUM_VIEW_NAME));
+        assertEquals("startup", tags.get("error").get(Constants.KEY_RUM_ERROR_SITUATION));
+    }
+
+    @Test public void backgroundPolicyDoesNotDropManualErrorsOrNativeAnrs() throws Exception {
+        FTActivityManager.get().appBackGround();
+        runQueuedEvents(() -> rum.addError("manual", "manual", ErrorType.ANR_ERROR.toString(), AppState.BACKGROUND));
+        assertEquals("manual", fields.get("error").get(Constants.KEY_RUM_ERROR_MESSAGE));
+        for (boolean historical : new boolean[]{false, true}) {
+            fields.remove("error");
+            HashMap<String, Object> property = new HashMap<>();
+            property.put(FTExceptionHandler.IS_PRE_CRASH, historical);
+            runQueuedEvents(() -> rum.addAutomaticIssue("native", "native-anr", Utils.getCurrentNanoTime(),
+                    FTIssueCategory.ANR, ErrorType.ANR_CRASH.toString(), AppState.UNKNOWN,
+                    historical, null, property, null));
+            assertEquals("native-anr", fields.get("error").get(Constants.KEY_RUM_ERROR_MESSAGE));
+        }
+    }
+
+    private void reportWatchdog(AppState onsetState) {
+        rum.addAutomaticIssue("stack", "anr", Utils.getCurrentNanoTime(), FTIssueCategory.ANR,
+                ErrorType.ANR_ERROR.toString(), onsetState, false, "main", null, null);
+    }
+
+    private void runQueuedEvents(Runnable action) throws Exception {
+        ThreadPoolExecutor queued = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
+                new LinkedBlockingQueue<>()) {
+            @Override public void execute(Runnable task) { getQueue().add(task); }
+        };
+        replace(BaseThreadPool.class, EventConsumerThreadPool.get(), "executor", queued);
+        try {
+            action.run();
+            int remaining = 100;
+            Runnable task;
+            while ((task = queued.getQueue().poll()) != null) {
+                assertTrue("Unexpected event queue loop", remaining-- > 0);
+                task.run();
+            }
+        } finally {
+            queued.shutdownNow();
+            replace(BaseThreadPool.class, EventConsumerThreadPool.get(), "executor", eventExecutor);
+        }
+    }
+
+    private void assertAutomaticCrashState(boolean historical) throws Exception {
+        ThreadPoolExecutor queued = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
+                new LinkedBlockingQueue<>()) {
+            @Override public void execute(Runnable task) { getQueue().add(task); }
+        };
+        replace(BaseThreadPool.class, EventConsumerThreadPool.get(), "executor", queued);
+        try {
+            FTActivityManager manager = FTActivityManager.get();
+            manager.appBackGround();
+            long occurredAt = Utils.getCurrentNanoTime();
+            HashMap<String, Object> property = new HashMap<>();
+            property.put(FTExceptionHandler.IS_PRE_CRASH, historical);
+            rum.addAutomaticIssue("stack", "crash", occurredAt, FTIssueCategory.CRASH,
+                    ErrorType.NATIVE.toString(), manager.getAppState(), historical, null, property, null);
+            manager.appForeground();
+            replace(FTActivityManager.class, manager, "foregroundCrashFreeDuration", 123L);
+            replace(FTActivityManager.class, manager, "backgroundCrashFreeDuration", 456L);
+            int remaining = 100;
+            Runnable task;
+            while ((task = queued.getQueue().poll()) != null) {
+                assertTrue("Unexpected event queue loop", remaining-- > 0);
+                task.run();
+            }
+            assertEquals("background", tags.get("error").get(Constants.KEY_RUM_ERROR_SITUATION));
+            assertFalse(fields.get("error").containsKey(Constants.KEY_RUM_APP_STATE));
+            assertFalse(tags.get("error").containsKey(Constants.KEY_RUM_APP_STATE));
+            assertTrue(lines.get("error").contains("error_situation=background"));
+            assertEquals(AppState.RUN, manager.getAppState());
+            if (historical) {
+                Field foreground = FTActivityManager.class.getDeclaredField("foregroundCrashFreeDuration");
+                Field background = FTActivityManager.class.getDeclaredField("backgroundCrashFreeDuration");
+                foreground.setAccessible(true);
+                background.setAccessible(true);
+                assertEquals(123L, foreground.getLong(manager));
+                assertEquals(456L, background.getLong(manager));
+            }
+        } finally {
+            queued.shutdownNow();
+            replace(BaseThreadPool.class, EventConsumerThreadPool.get(), "executor", eventExecutor);
+        }
     }
 
     private ActiveViewBean active() throws Exception {
@@ -412,7 +677,9 @@ public class RUMIntervalFieldsTest {
     private void advanceTo(long time) { clock.advance(time - clock.now); }
     private ThreadPoolExecutor executor(boolean run) {
         return new ThreadPoolExecutor(1, 1, 1, TimeUnit.SECONDS, new LinkedBlockingQueue<>()) {
-            @Override public void execute(Runnable task) { if (run) task.run(); }
+            @Override public void execute(Runnable task) {
+                if (run) task.run(); else queuedEvents.add(task);
+            }
         };
     }
     private static Object replace(Class<?> type, Object owner, String name, Object value) throws Exception {

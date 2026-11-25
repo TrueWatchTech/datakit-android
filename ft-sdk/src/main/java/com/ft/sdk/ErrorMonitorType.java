@@ -1,14 +1,14 @@
 package com.ft.sdk;
 
 /**
- * Error detection type, automatically added when calling {@link FTRUMInnerManager#addError} in Error transmission type
+ * Device metrics to attach to RUM Errors, configured with {@link FTRUMConfig#setExtraMonitorTypeWithError(int)}.
  *
  * @author Brandon
  */
 public enum ErrorMonitorType {
 
     /**
-     * All types {@link #BATTERY,#MEMORY,#CPU }
+     * Includes {@link #BATTERY}, {@link #MEMORY} and {@link #CPU}.
      */
     ALL(0xFFFFFFFF),
     /**

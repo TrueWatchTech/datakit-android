@@ -16,6 +16,7 @@ import com.ft.sdk.garble.utils.DCSWebViewUtils;
 import com.ft.sdk.garble.utils.LogUtils;
 import com.ft.sdk.garble.utils.TBSWebViewUtils;
 import com.ft.sdk.garble.utils.Utils;
+import com.ft.sdk.internal.RUMCustomKeys;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -367,8 +368,8 @@ final class FTWebViewHandler implements WebAppInterface.JsReceiver {
                     }
 
                     HashMap<String, Object> dynamicTags = FTRUMConfigManager.get().getRUMPublicDynamicTags();
-                    HashMap<String, Object> tagMaps = Utils.jsonToMap(jsonTags);
-                    tagMaps.putAll(dynamicTags);
+                    HashMap<String, Object> tagMaps = RUMCustomKeys.copy(Utils.jsonToMap(jsonTags));
+                    RUMCustomKeys.putUserProperties(tagMaps, dynamicTags);
                     HashMap<String, Object> fieldMaps = Utils.jsonToMap(jsonFields);
 
                     long time = data.optLong(Constants.TIME) * 1000000;

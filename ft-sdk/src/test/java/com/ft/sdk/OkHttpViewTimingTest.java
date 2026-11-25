@@ -60,7 +60,7 @@ public class OkHttpViewTimingTest {
         com.ft.sdk.garble.db.FTDBCachePolicy.get().initRUMParam(new FTRUMConfig());
         SyncDataHelper helper = new SyncDataHelper() {
             @Override public String getBodyContent(String measurement, HashMap<String, Object> tags,
-                    HashMap<String, Object> fields, long time, DataType type, String uuid, String visitor) {
+                    HashMap<String, Object> fields, long time, DataType type, String uuid, String visitor, com.ft.sdk.internal.RUMCustomKeys customKeys) {
                 if ("view".equals(measurement)) views.put((String) tags.get("view_id"), new HashMap<>(fields));
                 if ("resource".equals(measurement)) {
                     HashMap<String, Object> record = new HashMap<>(fields);
@@ -68,7 +68,7 @@ public class OkHttpViewTimingTest {
                     resources.add(record);
                 }
                 return dropped.contains(measurement) ? "" : super.getBodyContent(measurement, tags, fields,
-                        time, type, uuid, visitor);
+                        time, type, uuid, visitor, customKeys);
             }
         };
         helper.initBaseConfig(FTSDKConfig.builder().setEnableDataFilter(false));

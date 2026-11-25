@@ -17,11 +17,28 @@ Run against an existing device, using its actual serial:
 python3 ft-launch-fixture/verify.py --serial emulator-5554 --output docs/launch-type-acceptance
 ```
 
+To verify the warm-start split on a device, run:
+
+```sh
+python3 ft-launch-fixture/verify.py --serial emulator-5554 --warm-only --output docs/launch-warm-device
+```
+
+The warm-start suite compares an ordinary cold launch with two delayed first launches.
+One delays `Application.attachBaseContext` by 12 seconds before the SDK Application hook.
+The other gives a headless process 12 seconds before starting its first Activity. The runner
+checks the SDK's chosen origin, the real draw callback, and the stored Action payload.
+It also verifies warm launch after finishing and replacing an Activity in the same process,
+and hot launch when returning to the same Activity after 11 seconds in the background.
+Finally, it holds a cold launch's first draw through 61 seconds in the background
+and checks that the stored Action retains its full duration and mixed classification.
+
 The runner installs the fixture, resets only this fixture's data between scenarios,
 and stops its process on completion. It reads the actual stored cold-start Action
-line protocol and writes JSON evidence for each scenario:
+line protocol and writes JSON evidence for each scenario in the default suite:
 
 - Foreground-only startup, including classification remaining frozen after completion.
+- A background interval over 10 seconds followed by exactly one hot Action, current Activity tracking, and balanced foreground/background state after repeated hooks.
+- Activity recreation before first draw, retaining foreground classification and one eventual cold Action.
 - Headless background startup: `background`, no Activity, no first draw, and no automatic cold Action.
 - An explicit **test-only** background completion to verify `background` serialization and freezing.
 - Background startup, repeated Application hook, then foreground and an automatic first draw:
@@ -30,6 +47,10 @@ line protocol and writes JSON evidence for each scenario:
   then release: still `background` because the launch originated in the background.
 - Foreground startup with drawing held by an `OnPreDrawListener`, Home/background,
   return to the same Activity, then release: automatic `foreground_and_background`.
+
+On API 21–28, the runner verifies that unavailable Activity creation timing is omitted
+from both the counter and cold Action. API 21–23 also omit pre-Application timing.
+On API 29+, complete Activity-stage durations must sum to the cold-start duration.
 
 A headless background process has no Activity first-draw endpoint. The explicit
 background endpoint is deliberately identified as `explicit_test_completion` in

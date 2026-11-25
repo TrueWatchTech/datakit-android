@@ -12,8 +12,11 @@ import com.ft.sdk.garble.threadpool.RunnerCompleteCallBack;
 import com.ft.sdk.garble.utils.Constants;
 import com.ft.sdk.garble.utils.LogUtils;
 import com.ft.sdk.garble.utils.Utils;
+import com.ft.sdk.internal.RUMCustomKeys;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileReader;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -159,6 +162,7 @@ public class FTExceptionHandler implements Thread.UncaughtExceptionHandler {
             FTEarlyCrashTracker.get().recordCrash(occurredAtNs);
         }
         long occurredAtNanoseconds = Utils.getCurrentNanoTime();
+        AppState occurredAppState = FTActivityManager.get().getAppState();
         StringWriter writer = new StringWriter();
         PrintWriter printWriter = new PrintWriter(writer);
         e.printStackTrace(printWriter);
@@ -178,7 +182,7 @@ public class FTExceptionHandler implements Thread.UncaughtExceptionHandler {
         }
         CountDownLatch latch = new CountDownLatch(1);
         uploadCrashLog(writer.toString(), e.getMessage(), occurredAtNanoseconds,
-                FTActivityManager.get().getAppState(), t.getName(), new RunnerCompleteCallBack() {
+                occurredAppState, t.getName(), new RunnerCompleteCallBack() {
             @Override
             public void onComplete() {
                 latch.countDown();
@@ -217,10 +221,9 @@ public class FTExceptionHandler implements Thread.UncaughtExceptionHandler {
                 if (list != null) {
                     for (File item : list) {
 
-                        if (item.getName().startsWith(EXCEPTION_FILE_PREFIX_TOMBSTONE)) {
+                        if (isFinishedNativeDump(item)) {
                             try {
-                                String value = Utils.readSectionValueFromDump(item.getAbsolutePath(), DUMP_FILE_KEY_APP_STATE);
-                                uploadNativeCrash(item, AppState.getValueFrom(value), true, callBack);
+                                uploadNativeCrash(item, readNativeAppState(item), true, callBack);
                                 Utils.deleteFile(item.getAbsolutePath());
                             } catch (IOException e) {
                                 LogUtils.e(TAG, LogUtils.getStackTraceString(e));
@@ -230,6 +233,71 @@ public class FTExceptionHandler implements Thread.UncaughtExceptionHandler {
                 }
             }
         });
+    }
+
+    static boolean isFinishedNativeDump(File item) {
+        String name = item.getName();
+        if (!item.isFile() || !name.startsWith(EXCEPTION_FILE_PREFIX_TOMBSTONE)) return false;
+        // The ANR recorder owns its trace until it renames it. Older completed reports
+        // used several extensions, so retain the consumer's existing native/ANR name match.
+        return !name.endsWith(".trace.log") && !name.endsWith(".trace.xcrash")
+                && (name.contains(NATIVE_FILE_NAME) || name.contains(ANR_FILE_NAME));
+    }
+
+    static AppState readNativeAppState(File file) throws IOException {
+        String state = null;
+        String foreground = null;
+        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String trimmed = line.trim();
+                // If state sections already appeared before logcat, stop before scanning logcat.
+                if ("logcat:".equals(trimmed) && (state != null || foreground != null)) {
+                    break;
+                }
+                // Stack/logcat text may also mention these names; require a section header.
+                if ((DUMP_FILE_KEY_APP_STATE + ":").equals(trimmed)) {
+                    state = reader.readLine();
+                } else if ("foreground:".equals(trimmed)) {
+                    String candidate = reader.readLine();
+                    if (candidate != null) {
+                        String normalized = candidate.trim();
+                        if ("yes".equals(normalized) || "no".equals(normalized) || foreground == null) {
+                            foreground = candidate;
+                        }
+                    }
+                }
+            }
+        }
+        return resolveNativeAppState(state, foreground);
+    }
+
+    /** Decode the native recorder's state names without consulting the new process. */
+    static AppState resolveNativeAppState(String value, String foreground) {
+        String state = value == null ? "" : value.trim();
+        String visible = foreground == null ? "" : foreground.trim();
+        if ("yes".equals(visible)) {
+            return AppState.RUN;
+        }
+        if ("launch".equals(state) || "start".equals(state)) {
+            // The bundled native recorder updates this flag in onActivityPostCreated,
+            // which is unavailable below API 29; old dumps cannot distinguish startup
+            // from an app that has already returned to the background.
+            return Build.VERSION.SDK_INT >= 29 ? AppState.STARTUP : AppState.UNKNOWN;
+        }
+        if (AppState.STARTUP.toString().equals(state)) {
+            return AppState.STARTUP;
+        }
+        if (AppState.BACKGROUND.toString().equals(state)) {
+            return AppState.BACKGROUND;
+        }
+        if ("no".equals(visible)) {
+            return AppState.BACKGROUND;
+        }
+        if ("running".equals(state)) {
+            return AppState.RUN;
+        }
+        return AppState.getValueFrom(state);
     }
 
     /**
@@ -278,7 +346,7 @@ public class FTExceptionHandler implements Thread.UncaughtExceptionHandler {
     private void uploadNativeCrash(File item, AppState state, boolean isPreCrash, RunnerCompleteCallBack callBack) throws IOException {
         String crashString = Utils.readFile(item.getAbsolutePath(), Charset.defaultCharset());
         long crashTime = item.lastModified() * 1000000L;
-        HashMap<String, Object> property = new HashMap<>();
+        HashMap<String, Object> property = RUMCustomKeys.newMap();
         property.put(IS_PRE_CRASH, isPreCrash);
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R
                 && config.isEnableTrackAppANR()
@@ -289,7 +357,8 @@ public class FTExceptionHandler implements Thread.UncaughtExceptionHandler {
                     crashTime,
                     FTIssueCategory.ANR,
                     ErrorType.ANR_CRASH.toString(),
-                    state,
+                    // Dump/callback state describes collection, not the blocking onset.
+                    AppState.UNKNOWN,
                     isPreCrash,
                     null,
                     property,

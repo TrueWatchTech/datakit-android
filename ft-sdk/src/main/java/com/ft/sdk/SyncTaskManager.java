@@ -77,6 +77,10 @@ public class SyncTaskManager {
     private static final int RETRY_DELAY_SLEEP_TIME = 500;
 
     private static final int HTTP_TOO_MANY_REQUESTS = 429;
+
+    /** Scheduling must not contend with the upload operations synchronized on this. */
+    private final Object pollScheduleLock = new Object();
+
     /**
      * Count the number of errors per data type so one endpoint does not block others.
      */
@@ -234,11 +238,14 @@ public class SyncTaskManager {
      *
      * @param withSleep Whether to sleep, {@link #SLEEP_TIME}
      */
-    private synchronized void executePoll(final boolean withSleep) {
-        // Serialize choosing the first delay with scheduling. A manual immediate upload
-        // also consumes the first opportunity, without adding any delay to it.
-        long delay = FTEarlyCrashTracker.get().consumeInitialUploadDelay(SLEEP_TIME);
-        DataUploadThreadPool.get().schedule(withSleep ? delay : 0);
+    private void executePoll(final boolean withSleep) {
+        // Keep choosing the first delay and scheduling atomic, without waiting for
+        // the upload monitor held during HTTP requests and retry backoff.
+        synchronized (pollScheduleLock) {
+            // A manual immediate upload also consumes the first opportunity.
+            long delay = FTEarlyCrashTracker.get().consumeInitialUploadDelay(SLEEP_TIME);
+            DataUploadThreadPool.get().schedule(withSleep ? delay : 0);
+        }
     }
 
     /**

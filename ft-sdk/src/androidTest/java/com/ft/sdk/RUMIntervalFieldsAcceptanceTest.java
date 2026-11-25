@@ -60,6 +60,7 @@ public class RUMIntervalFieldsAcceptanceTest {
     private Activity activity;
     private String run;
     private final Map<String, String[]> expected = new LinkedHashMap<>();
+    private final Map<String, String> expectedErrorSituations = new LinkedHashMap<>();
     private final JSONArray evidence = new JSONArray();
 
     @Test(timeout = 150000)
@@ -97,6 +98,7 @@ public class RUMIntervalFieldsAcceptanceTest {
                         .setServiceName("rum_interval_acceptance"));
                 FTSdk.initRUMWithConfig(new FTRUMConfig().setRumAppId(appId)
                         .setSessionSamplingRate(100).setEnableTraceUserView(true)
+                        .setEnableTraceUserResource(true)
                         .setEnableTrackAppUIBlock(true, 300)
                         .addGlobalContext("acceptance_run", run));
             });
@@ -105,6 +107,8 @@ public class RUMIntervalFieldsAcceptanceTest {
             String fg = start("foreground", ViewTrackingType.MANUAL);
             resource("foreground", false, false);
             longTask("foreground", timedStart(), false);
+            action("foreground", timedStart());
+            error("manual_foreground", "run");
             // Exercise the real Looper detector, as well as explicit interval reporting below.
             instrumentation.runOnMainSync(() -> SystemClock.sleep(700));
             instrumentation.waitForIdleSync();
@@ -117,16 +121,26 @@ public class RUMIntervalFieldsAcceptanceTest {
             resource("mixed", true, false);
             Assert.assertFalse(FTActivityLifecycleCallbacks.isAppInForeground());
             longTask("mixed", crossStart, false);
+            action("mixed", crossStart);
             stop(mixed);
             expect("view", "mixed", "foreground_and_background", "sdk_init");
 
             String bg = start("background", ViewTrackingType.MANUAL);
             resource("background", false, false);
             longTask("background", timedStart(), false);
+            action("background", timedStart());
+            error("manual_background", "background");
             stop(bg);
             expect("view", "background", "background", "sdk_init");
+            resource("auto_background", false, false, 200, false, true);
 
             foreground();
+            resource("auto_foreground", false, false, 200, false, true);
+            resource("auto_mixed_http500", true, false, 500, false, true);
+            foreground();
+            // The response ends in background. Delay SDK processing until foreground return;
+            // Resource must keep its interval and Error its original occurrence situation.
+            resource("network_error_delayed", true, false, 500, true);
             FTRUMGlobalManager.get().stopView();
             // A bridge-owned automatic View must close at the real onStopped boundary.
             String auto = start("automatic_background", ViewTrackingType.AUTOMATIC);
@@ -143,14 +157,14 @@ public class RUMIntervalFieldsAcceptanceTest {
             stop(resumed);
             expect("view", "automatic_resumed", "foreground", "sdk_init");
 
-            // A positive, recent load origin predating this process's history must be unknown.
-            FTRUMGlobalManager.get().onCreateView(name("unknown"), 1_000_000L,
+            // Missing early history cannot negate foreground and background already observed.
+            FTRUMGlobalManager.get().onCreateView(name("incomplete_history"), 1_000_000L,
                     Utils.getCurrentNanoTime() - 60_000_000_000L);
-            String unknown = start("unknown", ViewTrackingType.MANUAL);
+            String unknown = start("incomplete_history", ViewTrackingType.MANUAL);
             resource("unknown", false, true);
             longTask("historical_unknown", timedStart(), true);
             stop(unknown);
-            expect("view", "unknown", "unknown", "sdk_init");
+            expect("view", "incomplete_history", "foreground_and_background", "sdk_init");
 
             FTRUMInnerManager rum = FTRUMInnerManager.get();
             String initialSession = rum.getSessionId();
@@ -265,10 +279,34 @@ public class RUMIntervalFieldsAcceptanceTest {
         return timing;
     }
 
+    private void action(String scenario, long start) {
+        FTRUMInnerManager.get().addAction(name(scenario), "acceptance",
+                Utils.getCurrentNanoTime() - start, start, properties(scenario));
+        expect("action", scenario, state(scenario), "sdk_init");
+    }
+
+    private void error(String scenario, String situation) {
+        FTRUMGlobalManager.get().addError("Acceptance handled error", name(scenario),
+                "custom", FTActivityManager.get().getAppState(), properties(scenario));
+        expect("error", scenario, null, "sdk_init");
+        expectedErrorSituations.put(scenario, situation);
+    }
+
     /** Real loopback HTTP, with lifecycle transition while the response is pending. */
     private void resource(String scenario, boolean crossBackground, boolean unknown) throws Exception {
+        resource(scenario, crossBackground, unknown, 200, false);
+    }
+
+    private void resource(String scenario, boolean crossBackground, boolean unknown,
+                          int status, boolean resumeBeforeProcessing) throws Exception {
+        resource(scenario, crossBackground, unknown, status, resumeBeforeProcessing, false);
+    }
+
+    private void resource(String scenario, boolean crossBackground, boolean unknown,
+                          int status, boolean resumeBeforeProcessing, boolean automatic) throws Exception {
         String id = name("resource_" + scenario);
-        FTRUMGlobalManager.get().startResource(id, properties(scenario));
+        boolean beganInForeground = FTActivityLifecycleCallbacks.isAppInForeground();
+        if (!automatic) FTRUMGlobalManager.get().startResource(id, properties(scenario));
         NetStatusBean timing = timing(unknown);
         AtomicReference<Throwable> failure = new AtomicReference<>();
         try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
@@ -283,7 +321,7 @@ public class RUMIntervalFieldsAcceptanceTest {
                     }
                     SystemClock.sleep(150);
                     if (crossBackground) background();
-                    socket.getOutputStream().write(("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n"
+                    socket.getOutputStream().write(("HTTP/1.1 " + status + " Acceptance\r\nContent-Length: 2\r\n"
                             + "Content-Type: text/plain\r\nConnection: close\r\n\r\nOK")
                             .getBytes(StandardCharsets.UTF_8));
                     socket.getOutputStream().flush();
@@ -291,27 +329,58 @@ public class RUMIntervalFieldsAcceptanceTest {
             }, "rum-acceptance-http");
             responder.start();
             String url = "http://127.0.0.1:" + server.getLocalPort() + "/" + scenario;
-            HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
-            connection.setConnectTimeout(15000);
-            connection.setReadTimeout(15000);
-            try {
-                Assert.assertEquals(200, connection.getResponseCode());
-                while (connection.getInputStream().read() != -1) { /* consume response */ }
-            } finally { connection.disconnect(); }
+            if (automatic) {
+                okhttp3.OkHttpClient client = new okhttp3.OkHttpClient.Builder()
+                        .addInterceptor(new FTResourceInterceptor())
+                        .eventListenerFactory(new FTResourceEventListener.FTFactory())
+                        .callTimeout(15, java.util.concurrent.TimeUnit.SECONDS).build();
+                try (okhttp3.Response response = client.newCall(
+                        new okhttp3.Request.Builder().url(url).build()).execute()) {
+                    Assert.assertEquals(status, response.code());
+                    Assert.assertNotNull(response.body());
+                    Assert.assertEquals("OK", response.body().string());
+                } finally {
+                    client.connectionPool().evictAll();
+                    client.dispatcher().executorService().shutdown();
+                }
+            } else {
+                HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+                connection.setConnectTimeout(15000);
+                connection.setReadTimeout(15000);
+                try {
+                    Assert.assertEquals(status, connection.getResponseCode());
+                    java.io.InputStream response = status >= 400 ? connection.getErrorStream()
+                            : connection.getInputStream();
+                    try (java.io.InputStream body = response) {
+                        while (body.read() != -1) { /* consume response */ }
+                    }
+                } finally { connection.disconnect(); }
+            }
+            timing.bodyEndTime = System.nanoTime();
             responder.join(15000);
             Assert.assertFalse("HTTP responder terminated", responder.isAlive());
             if (failure.get() != null) throw new AssertionError(failure.get());
-            finishResource(id, timing, scenario, url);
+            if (resumeBeforeProcessing) foreground();
+            if (!automatic) finishResource(id, timing, scenario, url, status);
         }
-        expect("resource", scenario, state(scenario), "sdk_init");
+        expect("resource", scenario, unknown ? "unknown" : crossBackground
+                ? "foreground_and_background" : beganInForeground ? "foreground" : "background", "sdk_init");
+        if (status >= 400) {
+            expect("error", scenario, null, "sdk_init");
+            expectedErrorSituations.put(scenario, "background");
+        }
     }
 
     private void finishResource(String id, NetStatusBean timing, String scenario, String url) {
-        timing.bodyEndTime = System.nanoTime();
+        finishResource(id, timing, scenario, url, 200);
+    }
+
+    private void finishResource(String id, NetStatusBean timing, String scenario, String url, int status) {
+        if (timing.bodyEndTime == 0) timing.bodyEndTime = System.nanoTime();
         ResourceParams params = new ResourceParams();
         params.url = url;
         params.resourceMethod = "GET";
-        params.resourceStatus = 200;
+        params.resourceStatus = status;
         params.responseContentType = "text/plain";
         params.property = properties(scenario);
         FTRUMGlobalManager.get().stopResource(id);
@@ -328,7 +397,7 @@ public class RUMIntervalFieldsAcceptanceTest {
         FTRUMGlobalManager.get().addAction(name(scenario), "acceptance", properties(scenario));
         stop(id);
         expect("view", scenario, "foreground", reason);
-        expect("action", scenario, null, reason);
+        expect("action", scenario, "foreground", reason);
     }
 
     private void setTimer(String name, long value) throws Exception {
@@ -365,6 +434,16 @@ public class RUMIntervalFieldsAcceptanceTest {
                 if ("view".equals(data.getMeasurement())
                         && !Boolean.FALSE.equals(data.getFieldAsBoolean("is_active"))) continue;
                 String key = data.getMeasurement() + ":" + data.getFieldAsString("acceptance_case");
+                String resourceUrl = data.getTagAsString("resource_url");
+                if (("resource".equals(data.getMeasurement()) || "error".equals(data.getMeasurement()))
+                        && resourceUrl != null && resourceUrl.contains("/auto_")) {
+                    key = data.getMeasurement() + ":" + resourceUrl.substring(resourceUrl.lastIndexOf('/') + 1);
+                }
+                if ("error".equals(data.getMeasurement())
+                        && data.getTagAsString("resource_url") != null
+                        && data.getTagAsString("resource_url").endsWith("/network_error_delayed")) {
+                    key = "error:network_error_delayed";
+                }
                 if ("long_task".equals(data.getMeasurement())
                         && data.getField("acceptance_case") == null
                         && name("foreground").equals(data.getTagAsString("view_name"))
@@ -378,6 +457,15 @@ public class RUMIntervalFieldsAcceptanceTest {
             SystemClock.sleep(200);
         }
         write("rum-acceptance-payloads.txt", lines.toString());
+        LineProtocolData delayedResource = found.get("resource:network_error_delayed");
+        LineProtocolData delayedError = found.get("error:network_error_delayed");
+        Assert.assertNotNull("delayed Resource", delayedResource);
+        Assert.assertNotNull("delayed network Error", delayedError);
+        for (String tag : new String[]{"resource_id", "session_id", "view_id"}) {
+            Assert.assertNotNull("network association " + tag, delayedResource.getTag(tag));
+            Assert.assertEquals("network Error retains original " + tag,
+                    delayedResource.getTag(tag), delayedError.getTag(tag));
+        }
         for (Map.Entry<String, String[]> entry : expected.entrySet()) {
             LineProtocolData data = found.get(entry.getKey());
             Assert.assertNotNull("payload missing: " + entry.getKey() + " found=" + found.keySet(), data);
@@ -385,8 +473,17 @@ public class RUMIntervalFieldsAcceptanceTest {
                     data.getFieldAsString("app_state"));
             Assert.assertEquals(entry.getKey() + " session_start_reason", entry.getValue()[1],
                     data.getFieldAsString("session_start_reason"));
+            Assert.assertNotNull(entry.getKey() + " session_id", data.getTag("session_id"));
+            Assert.assertNotNull(entry.getKey() + " view_id", data.getTag("view_id"));
+            if ("error".equals(data.getMeasurement())) {
+                String scenario = entry.getKey().substring("error:".length());
+                Assert.assertNull(entry.getKey() + " no app_state tag", data.getTag("app_state"));
+                Assert.assertEquals(entry.getKey() + " error_situation",
+                        expectedErrorSituations.get(scenario), data.getTagAsString("error_situation"));
+            }
             evidence.put(new JSONObject().put("case", entry.getKey())
                     .put("app_state", data.getField("app_state"))
+                    .put("error_situation", data.getTag("error_situation"))
                     .put("session_start_reason", data.getField("session_start_reason"))
                     .put("session_id", data.getTag("session_id"))
                     .put("view_id", data.getTag("view_id"))

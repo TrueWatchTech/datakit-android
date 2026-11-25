@@ -1,12 +1,13 @@
 package com.ft.sdk;
 
+/** Controls eviction at the RUM row-count limit set by {@link FTRUMConfig#setRumCacheLimitCount(int)}. */
 public enum RUMCacheDiscard {
     /**
-     * Discard front, default
+     * Discard incoming records that exceed the limit (default).
      */
     DISCARD,
     /**
-     * Discard rear
+     * Evict the oldest cached records to make room for incoming records.
      */
     DISCARD_OLDEST
 }

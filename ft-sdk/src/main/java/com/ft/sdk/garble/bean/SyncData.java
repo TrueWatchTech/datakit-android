@@ -173,7 +173,7 @@ public class SyncData implements Cloneable {
             recordData.setUuid(uuid);
         }
         String bodyContent = helper.getBodyContent(bean.getMeasurement(), bean.getTags(),
-                bean.getFields(), bean.getTimeNano(), dataType, uuid, visitorId);
+                bean.getFields(), bean.getTimeNano(), dataType, uuid, visitorId, bean.getCustomKeys());
         if (Utils.isNullOrEmpty(bodyContent)) {
             return null;
         }

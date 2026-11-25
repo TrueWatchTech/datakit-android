@@ -8,7 +8,7 @@ import java.util.HashMap;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Link tracing
+ * Generates propagation headers for requests instrumented by the application.
  */
 public class FTTraceManager {
     private static final String TAG = Constants.LOG_TAG_PREFIX + "FTTraceManager";
@@ -20,6 +20,7 @@ public class FTTraceManager {
         private static final FTTraceManager INSTANCE = new FTTraceManager();
     }
 
+    /** Returns the singleton for manual HTTP trace propagation. */
     public static FTTraceManager get() {
         return FTTraceManager.SingletonHolder.INSTANCE;
     }
@@ -34,13 +35,11 @@ public class FTTraceManager {
     }
 
     /**
-     * Get trace HTTP request header parameters
+     * Generates headers and stores the trace context under the resource ID for RUM correlation.
      *
-     * @param key       resource ID
-     * @param urlString URL address
-     * @return
-     * @throws MalformedURLException
-     * @throws URISyntaxException
+     * @param key       unique ID also used to report this request as a RUM resource
+     * @param urlString URL of the outgoing request
+     * @return headers to add to the request; empty if the URL cannot be parsed or Trace is unconfigured
      */
     public HashMap<String, String> getTraceHeader(String key, String urlString) {
         FTTraceHandler handler = new FTTraceHandler();
@@ -50,12 +49,10 @@ public class FTTraceManager {
     }
 
     /**
-     * Get trace HTTP request header parameters
+     * Generates propagation headers for a request without binding a RUM resource ID.
      *
-     * @param urlString URL address
-     * @return
-     * @throws MalformedURLException
-     * @throws URISyntaxException
+     * @param urlString URL of the outgoing request
+     * @return headers to add to the request; empty if the URL cannot be parsed or Trace is unconfigured
      */
     public HashMap<String, String> getTraceHeader(String urlString) {
         return new FTTraceHandler().getTraceHeader(urlString);

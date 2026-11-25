@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="launch_test_background">#172554</color>
+    <string name="launch_test_home_activity" translatable="false">com.ft.MainActivity</string>
+    <style name="LaunchTestTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@drawable/launch_test_background</item>
+        <item name="android:statusBarColor">@color/launch_test_background</item>
+        <item name="android:navigationBarColor">@color/launch_test_background</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>

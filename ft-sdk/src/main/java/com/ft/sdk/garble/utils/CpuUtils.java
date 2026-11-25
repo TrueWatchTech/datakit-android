@@ -20,22 +20,6 @@ public class CpuUtils {
     }
 
     /**
-     * File /proc/stat
-     */
-    private RandomAccessFile mProcStatFile;
-
-    /**
-     * File /proc/{pid}/stat
-     */
-    private RandomAccessFile mAppStatFile;
-
-
-    /**
-     * File /proc/{pid}/stat
-     */
-    private RandomAccessFile mSelfStatFile;
-
-    /**
      * CPU last jump count
      */
     private Long mLastCpuTime;
@@ -130,16 +114,10 @@ public class CpuUtils {
         long cpuTime;
         long appTime;
         float value = 0.0f;
-        try {
-            if (mProcStatFile == null || mAppStatFile == null) {
-                mProcStatFile = new RandomAccessFile("/proc/stat", "r");
-                mAppStatFile = new RandomAccessFile("/proc/" + android.os.Process.myPid() + "/stat", "r");
-            } else {
-                mProcStatFile.seek(0L);
-                mAppStatFile.seek(0L);
-            }
-            String procStatString = mProcStatFile.readLine();
-            String appStatString = mAppStatFile.readLine();
+        try (RandomAccessFile procStat = ProcFiles.openSystemStat();
+             RandomAccessFile appStat = ProcFiles.openProcessFile("stat")) {
+            String procStatString = procStat.readLine();
+            String appStatString = appStat.readLine();
             String[] procStats = procStatString.split(" ");
             String[] appStats = appStatString.split(" ");
             cpuTime = Long.parseLong(procStats[2]) + Long.parseLong(procStats[3])
@@ -167,13 +145,8 @@ public class CpuUtils {
      * @return
      */
     public long getAppCPUTickCount() {
-        try {
-            if (mSelfStatFile == null) {
-                mSelfStatFile = new RandomAccessFile("/proc/" + android.os.Process.myPid() + "/stat", "r");
-            } else {
-                mSelfStatFile.seek(0);
-            }
-            String statString = mSelfStatFile.readLine();
+        try (RandomAccessFile appStat = ProcFiles.openProcessFile("stat")) {
+            String statString = appStat.readLine();
             String[] procStats = statString.split(" ");
             return Long.parseLong(procStats[13]);
 

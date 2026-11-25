@@ -3,6 +3,7 @@ package com.ft.sdk;
 import com.ft.sdk.garble.bean.NetStatusBean;
 import com.ft.sdk.garble.bean.ResourceParams;
 import com.ft.sdk.garble.utils.Utils;
+import com.ft.sdk.internal.RUMCustomKeys;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -84,7 +85,7 @@ final class FTURLConnectionRequestState {
             if (!started || terminal) return;
             terminal = true;
             params.enableResourceSize = complete && sizeKnown;
-            params.property = new HashMap<>();
+            params.property = RUMCustomKeys.newMap();
             params.property.put("resource_collection_source", "http_url_connection");
             params.property.put("resource_completion", completion);
             params.property.put("resource_body_complete", complete);

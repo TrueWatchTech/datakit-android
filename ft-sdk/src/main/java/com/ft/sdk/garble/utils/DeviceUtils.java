@@ -18,7 +18,6 @@ import android.util.DisplayMetrics;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.RandomAccessFile;
@@ -36,9 +35,6 @@ import java.util.regex.Pattern;
 public class DeviceUtils {
     public static final String TAG = Constants.LOG_TAG_PREFIX + "DeviceUtils";
     private static final String VM_RSS_PATTERN = "VmRSS:\\s+(\\d+) kB";
-
-    private RandomAccessFile mProcStatusFile;
-
 
     private DeviceUtils() {
 
@@ -196,30 +192,19 @@ public class DeviceUtils {
      * @return
      */
     public long getAppMemoryUseSize() {
-        long memorySize = 0;
-        try {
-            if (mProcStatusFile == null) {
-                mProcStatusFile = new RandomAccessFile("/proc/" + android.os.Process.myPid() + "/status", "r");
-            } else {
-                mProcStatusFile.seek(0);
-            }
+        try (RandomAccessFile status = ProcFiles.openProcessFile("status")) {
             String statusString;
             Pattern p = Pattern.compile(VM_RSS_PATTERN);
-            while ((statusString = mProcStatusFile.readLine()) != null) {
+            while ((statusString = status.readLine()) != null) {
                 Matcher m = p.matcher(statusString);
                 if (m.matches()) {
-                    memorySize = Long.parseLong(m.group(1));
-                    break;
+                    return Long.parseLong(m.group(1)) * 1000;
                 }
             }
-            return memorySize * 1000;
-        } catch (FileNotFoundException e) {
-            LogUtils.e(TAG, LogUtils.getStackTraceString(e));
         } catch (IOException e) {
             LogUtils.e(TAG, LogUtils.getStackTraceString(e));
         }
-        return memorySize;
-
+        return 0;
     }
 
     /**

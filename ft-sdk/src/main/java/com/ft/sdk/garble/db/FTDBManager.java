@@ -22,6 +22,7 @@ import com.ft.sdk.garble.bean.ActionBean;
 import com.ft.sdk.garble.bean.DataType;
 import com.ft.sdk.garble.bean.SyncData;
 import com.ft.sdk.garble.bean.ViewBean;
+import com.ft.sdk.garble.db.ProviderSql.AggregateUpdate;
 import com.ft.sdk.garble.db.base.DBManager;
 import com.ft.sdk.garble.db.base.DatabaseHelper;
 import com.ft.sdk.garble.db.file.FTHistoricalFileStore;
@@ -107,9 +108,7 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
         if (dataType != null) {
             where.append(" where ")
                     .append(FTSQL.RECORD_COLUMN_DATA_TYPE)
-                    .append("='")
-                    .append(dataType)
-                    .append("'");
+                    .append("=?");
         } else {
             where.append(" where ")
                     .append(FTSQL.RECORD_COLUMN_DATA_TYPE)
@@ -120,8 +119,9 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
                 .append(" ASC LIMIT ")
                 .append(limit)
                 .append(")");
-        int deleted=db.delete(FTSQL.FT_SYNC_DATA_FLAT_TABLE_NAME, where.toString(), null);
-        DiagnosticsBridge.record("storage_remove",dataType,deleted,-1,"sqlite_full_cleanup");
+        int deleted = db.delete(FTSQL.FT_SYNC_DATA_FLAT_TABLE_NAME, where.toString(),
+                dataType == null ? null : new String[]{dataType});
+        DiagnosticsBridge.record("storage_remove", dataType, deleted, -1, "sqlite_full_cleanup");
         return deleted;
     }
 
@@ -232,15 +232,12 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
         LogUtils.d(TAG, "closeAction:" + actionId + ",duration:" + duration);
 
         try {
-            final String where = FTSQL.RUM_COLUMN_ID + "='" + actionId + "'"
-                    + (force ? "" : ("AND " + FTSQL.RUM_COLUMN_PENDING_RESOURCE + "<=0"));
-            // Since rawQuery returns a Bundle, we need to get data through other methods
-            // Here we directly use ContentProvider's query method
+            final String where = force ? ProviderSql.BY_ID : ProviderSql.CLOSEABLE_ACTION;
             Uri uri = FTContentProvider.getUriActionData();
             String selection = FTSQL.RUM_COLUMN_ID + "=?";
             String[] selectionArgs = {actionId};
 
-            Cursor cursor = contentProvider.query(uri, null, where, null, null);
+            Cursor cursor = contentProvider.query(uri, null, where, selectionArgs, null);
             if (cursor != null && cursor.moveToFirst()) {
                 ContentValues contentValues = new ContentValues();
                 contentValues.put(FTSQL.RUM_COLUMN_IS_CLOSE, 1);
@@ -302,199 +299,67 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
 
 
     public void increaseActionError(String actionId) {
-        increase(FTSQL.FT_TABLE_ACTION, actionId, FTSQL.RUM_COLUMN_ERROR_COUNT);
+        updateAggregate(AggregateUpdate.ACTION_ERRORS, actionId, 0);
     }
 
-
     public void increaseActionResource(String actionId) {
-        increase(FTSQL.FT_TABLE_ACTION, actionId, FTSQL.RUM_COLUMN_RESOURCE_COUNT);
+        updateAggregate(AggregateUpdate.ACTION_RESOURCES, actionId, 0);
     }
 
     public void increaseActionLongTask(String actionId) {
-        increase(FTSQL.FT_TABLE_ACTION, actionId, FTSQL.RUM_COLUMN_LONG_TASK_COUNT);
-
+        updateAggregate(AggregateUpdate.ACTION_LONG_TASKS, actionId, 0);
     }
 
     public void increaseViewAction(String viewId) {
-        increase(FTSQL.FT_TABLE_VIEW, viewId, FTSQL.RUM_COLUMN_ACTION_COUNT);
+        updateAggregate(AggregateUpdate.VIEW_ACTIONS, viewId, 0);
     }
 
     public void increaseViewResource(String viewId) {
-        increase(FTSQL.FT_TABLE_VIEW, viewId, FTSQL.RUM_COLUMN_RESOURCE_COUNT);
+        updateAggregate(AggregateUpdate.VIEW_RESOURCES, viewId, 0);
     }
 
     public void increaseViewPendingResource(String viewId) {
-        increase(FTSQL.FT_TABLE_VIEW, viewId, FTSQL.RUM_COLUMN_PENDING_RESOURCE);
+        updateAggregate(AggregateUpdate.VIEW_PENDING_ADD, viewId, 0);
     }
 
     public void increaseActionPendingResource(String actionId) {
-        increase(FTSQL.FT_TABLE_ACTION, actionId, FTSQL.RUM_COLUMN_PENDING_RESOURCE);
+        updateAggregate(AggregateUpdate.ACTION_PENDING_ADD, actionId, 0);
     }
 
     public void reduceViewPendingResource(String viewId) {
-        reduce(FTSQL.FT_TABLE_VIEW, viewId, FTSQL.RUM_COLUMN_PENDING_RESOURCE);
+        updateAggregate(AggregateUpdate.VIEW_PENDING_REMOVE, viewId, 0);
     }
 
     public void reduceActionPendingResource(String actionId) {
-        reduce(FTSQL.FT_TABLE_ACTION, actionId, FTSQL.RUM_COLUMN_PENDING_RESOURCE);
+        updateAggregate(AggregateUpdate.ACTION_PENDING_REMOVE, actionId, 0);
     }
 
     public void increaseViewError(String viewId) {
-        increase(FTSQL.FT_TABLE_VIEW, viewId, FTSQL.RUM_COLUMN_ERROR_COUNT);
-
+        updateAggregate(AggregateUpdate.VIEW_ERRORS, viewId, 0);
     }
 
     public void increaseViewLongTask(String viewId) {
-        increase(FTSQL.FT_TABLE_VIEW, viewId, FTSQL.RUM_COLUMN_LONG_TASK_COUNT);
+        updateAggregate(AggregateUpdate.VIEW_LONG_TASKS, viewId, 0);
     }
 
-
-    /**
-     * Decrement data count
-     *
-     * @param tableName
-     * @param id
-     * @param columnName
-     */
-    private void increase(final String tableName, final String id, final String columnName) {
-        if (id == null) return;
-
-        try {
-            Uri uri = tableName.equals(FTSQL.FT_TABLE_VIEW) ?
-                    FTContentProvider.getUriViewData() : FTContentProvider.getUriActionData();
-            // Since rawQuery returns a Bundle, we need to get data through other methods
-            // Here we directly use ContentProvider's query method
-            String selection = FTSQL.RUM_COLUMN_ID + "=?";
-            String[] selectionArgs = {id};
-
-            Cursor cursor = contentProvider.query(uri, null, selection, selectionArgs, null);
-            if (cursor != null && cursor.moveToFirst()) {
-                int count = cursor.getCount();
-
-                if (count > 0) {
-                    // Use ContentProvider's call method to execute execSQL
-                    String updateSql = "UPDATE " + tableName + " SET " + columnName + "=" + columnName + "+1 WHERE " + FTSQL.RUM_COLUMN_ID + "='" + id + "'";
-
-                    Bundle updateExtras = new Bundle();
-                    updateExtras.putString("sql", updateSql);
-
-                    Bundle updateResult = contentProvider.call(uri, FTContentProvider.METHOD_EXEC_SQL, null, updateExtras);
-                    if (!updateResult.getBoolean("success")) {
-                        LogUtils.e(TAG, "increase executed failed via ContentProvider: " + updateSql);
-                    }
-                }
-            }
-            if (cursor != null) {
-                cursor.close();
-            }
-        } catch (Exception e) {
-            LogUtils.d(TAG, LogUtils.getStackTraceString(e));
-        }
-    }
-
-    /**
-     * Decrement data count
-     *
-     * @param tableName
-     * @param id
-     * @param columnName
-     */
-
-    private void reduce(final String tableName, final String id, final String columnName) {
-        if (id == null) return;
-
-        try {
-            // Since rawQuery returns a Bundle, we need to get data through other methods
-            // Here we directly use ContentProvider's query method
-            Uri uri = tableName.equals(FTSQL.FT_TABLE_VIEW) ?
-                    FTContentProvider.getUriViewData() : FTContentProvider.getUriActionData();
-            String selection = FTSQL.RUM_COLUMN_ID + "=?";
-            String[] selectionArgs = {id};
-
-            Cursor cursor = contentProvider.query(uri, null, selection, selectionArgs, null);
-            if (cursor != null && cursor.moveToFirst()) {
-                int count = cursor.getCount();
-
-                if (count > 0) {
-                    // Use ContentProvider's call method to execute execSQL
-                    String updateSql = "UPDATE " + tableName + " SET " + columnName + "=" + columnName + "-1 WHERE " + FTSQL.RUM_COLUMN_ID + "='" + id + "'";
-
-                    Bundle updateExtras = new Bundle();
-                    updateExtras.putString("sql", updateSql);
-
-                    Bundle updateResult = contentProvider.call(uri, FTContentProvider.METHOD_EXEC_SQL, null, updateExtras);
-                    if (!updateResult.getBoolean("success")) {
-                        LogUtils.d(TAG, "reduce executed failed via ContentProvider: " + updateSql);
-                    }
-                }
-            }
-            if (cursor != null) {
-                cursor.close();
-            }
-        } catch (Exception e) {
-            LogUtils.d(TAG, LogUtils.getStackTraceString(e));
-        }
-    }
-
-    /**
-     * Update View upload time, used to mark delayed Resource data
-     */
     public void updateViewUploadTime(String viewId, long dateTime) {
-        updateViewDateTimeByColumn(viewId, FTSQL.RUM_DATA_UPLOAD_TIME, dateTime);
+        updateAggregate(AggregateUpdate.VIEW_UPLOAD_TIME, viewId, dateTime);
     }
 
-    /**
-     * Update View update time, used to mark delayed Resource data
-     */
     public void updateViewUpdateTime(String viewId, long dateTime) {
-        updateViewDateTimeByColumn(viewId, FTSQL.RUM_DATA_UPDATE_TIME, dateTime);
+        updateAggregate(AggregateUpdate.VIEW_UPDATE_TIME, viewId, dateTime);
     }
 
-    /**
-     * Update viewid update and upload status
-     *
-     * @param viewId
-     * @param columName {@link FTSQL#RUM_DATA_UPDATE_TIME},{@link FTSQL#RUM_DATA_UPLOAD_TIME}
-     * @param dateTime  time, milliseconds
-     */
-    private void updateViewDateTimeByColumn(String viewId, String columName, long dateTime) {
-        if (viewId == null) return;
-
+    private void updateAggregate(AggregateUpdate operation, String id, long time) {
+        if (id == null) return;
         try {
-            // Since rawQuery returns a Bundle, we need to get data through other methods
-            // Here we directly use ContentProvider's query method
-            Uri uri = FTContentProvider.getUriViewData();
-            String selection = FTSQL.RUM_COLUMN_ID + "=?";
-            String[] selectionArgs = {viewId};
-
-            Cursor cursor = contentProvider.query(uri, null, selection, selectionArgs, null);
-            if (cursor != null && cursor.moveToFirst()) {
-                int count = cursor.getCount();
-
-                if (count > 0) {
-                    // Use ContentProvider's call method to execute execSQL
-                    String sql1 = "UPDATE " + FTSQL.FT_TABLE_VIEW + " SET " + columName + "=" + dateTime + " WHERE " + FTSQL.RUM_COLUMN_ID + "='" + viewId + "'";
-                    String sql2 = "UPDATE " + FTSQL.FT_TABLE_VIEW + " SET " + FTSQL.RUM_VIEW_UPDATE_TIME + "=" + FTSQL.RUM_VIEW_UPDATE_TIME + "+ 1 WHERE " + FTSQL.RUM_COLUMN_ID + "='" + viewId + "'";
-
-                    // Execute first UPDATE statement
-                    Bundle updateExtras1 = new Bundle();
-                    updateExtras1.putString("sql", sql1);
-                    Bundle updateResult1 = contentProvider.call(uri, FTContentProvider.METHOD_EXEC_SQL, null, updateExtras1);
-
-                    // Execute second UPDATE statement
-                    Bundle updateExtras2 = new Bundle();
-                    updateExtras2.putString("sql", sql2);
-                    Bundle updateResult2 = contentProvider.call(uri, FTContentProvider.METHOD_EXEC_SQL, null, updateExtras2);
-
-                    if (updateResult1.getBoolean("success")
-                            && updateResult2.getBoolean("success")) {
-                    } else {
-                        LogUtils.d(TAG, "updateViewDateTimeByColumn executed failed via ContentProvider");
-                    }
-                }
-            }
-            if (cursor != null) {
-                cursor.close();
+            Bundle extras = new Bundle();
+            extras.putString(FTSQL.RUM_COLUMN_ID, id);
+            if (operation.usesTimestamp) extras.putLong(FTSQL.RECORD_COLUMN_TM, time);
+            Bundle result = contentProvider.call(FTContentProvider.getUriViewData(),
+                    FTContentProvider.METHOD_UPDATE_AGGREGATE, operation.name(), extras);
+            if (result == null || !result.getBoolean("success")) {
+                LogUtils.e(TAG, "Aggregate update failed: " + operation);
             }
         } catch (Exception e) {
             LogUtils.d(TAG, LogUtils.getStackTraceString(e));
@@ -601,15 +466,7 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
         try {
             // Use ContentProvider to query data
             // Uri uri = Uri.parse("content://com.ft.sdk.provider/view_data");
-            String selection;
-            if (allData) {
-                selection = null;
-            } else {
-                selection = "(" + FTSQL.RUM_COLUMN_IS_CLOSE + "=1 AND (" +
-                        FTSQL.RUM_DATA_UPLOAD_TIME + "<" + FTSQL.RUM_DATA_UPDATE_TIME
-                        + " OR " + FTSQL.RUM_DATA_UPLOAD_TIME + "=0 )) OR "
-                        + FTSQL.RUM_COLUMN_IS_CLOSE + "=0 ";
-            }
+            String selection = allData ? null : ProviderSql.PENDING_VIEWS;
             String sortOrder = FTSQL.RUM_COLUMN_START_TIME + " ASC";
 
             String finalSortOrder = sortOrder;
@@ -668,14 +525,7 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
 
         try {
             // Use ContentProvider to delete data
-            StringBuilder placeholders = new StringBuilder();
-            for (int i = 0; i < ids.length; i++) {
-                placeholders.append("?");
-                if (i < ids.length - 1) {
-                    placeholders.append(",");
-                }
-            }
-            String selection = FTSQL.RUM_COLUMN_ID + " IN (" + placeholders + ")";
+            String selection = ProviderSql.in(FTSQL.RUM_COLUMN_ID, ids.length);
             int deletedRows = contentProvider.delete(FTContentProvider.getUriActionData(), selection, ids);
             if (deletedRows > 0) {
                 LogUtils.d(TAG, "cleanCloseActionData executed successfully " +
@@ -693,17 +543,7 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
         if (isAndroidTest) return;
 
         try {
-            // Use ContentProvider's call method to execute execSQL
-            String sql = "DELETE FROM " + FTSQL.FT_TABLE_VIEW + " WHERE " + FTSQL.RUM_COLUMN_IS_CLOSE
-                    + "=1 AND " + FTSQL.RUM_COLUMN_PENDING_RESOURCE + "<=0";
-
-            Bundle extras = new Bundle();
-            extras.putString("sql", sql);
-
-            Bundle result = contentProvider.call(FTContentProvider.getUriViewData(), FTContentProvider.METHOD_EXEC_SQL, null, extras);
-            if (!result.getBoolean("success")) {
-                LogUtils.e(TAG, "cleanCloseViewData executed failed via ContentProvider");
-            }
+            contentProvider.delete(FTContentProvider.getUriViewData(), ProviderSql.CLOSED_VIEW, null);
         } catch (Exception e) {
             LogUtils.d(TAG, LogUtils.getStackTraceString(e));
         }
@@ -713,29 +553,13 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
         LogUtils.d(TAG, "closeAllActionAndView");
 
         try {
-            // Use ContentProvider's call method to execute execSQL for View table
-            String viewSql = "UPDATE " + FTSQL.FT_TABLE_VIEW + " SET "
-                    + FTSQL.RUM_COLUMN_IS_CLOSE + "=1," + FTSQL.RUM_COLUMN_PENDING_RESOURCE + "=0," + FTSQL.RUM_DATA_UPDATE_TIME + "=" + System.currentTimeMillis();
-
-            Bundle viewExtras = new Bundle();
-            viewExtras.putString("sql", viewSql);
-
-            Bundle viewResult = contentProvider.call(FTContentProvider.getUriViewData(),
-                    FTContentProvider.METHOD_EXEC_SQL, null, viewExtras);
-
-            // Use ContentProvider's call method to execute execSQL for Action table
-            String actionSql = "UPDATE " + FTSQL.FT_TABLE_ACTION + " SET "
-                    + FTSQL.RUM_COLUMN_IS_CLOSE + "=1 ," + FTSQL.RUM_COLUMN_PENDING_RESOURCE + "=0";
-
-            Bundle actionExtras = new Bundle();
-            actionExtras.putString("sql", actionSql);
-
-            Bundle actionResult = contentProvider.call(FTContentProvider.getUriActionData(), FTContentProvider.METHOD_EXEC_SQL, null, actionExtras);
-
-            if (!viewResult.getBoolean("success") || !actionResult.getBoolean("success")) {
-                //LogUtils.d(TAG, "closeAllActionAndView executed successfully via ContentProvider");
-                LogUtils.e(TAG, "closeAllActionAndView executed failed via ContentProvider");
-            }
+            ContentValues values = new ContentValues();
+            values.put(FTSQL.RUM_COLUMN_IS_CLOSE, 1);
+            values.put(FTSQL.RUM_COLUMN_PENDING_RESOURCE, 0);
+            values.put(FTSQL.RUM_DATA_UPDATE_TIME, System.currentTimeMillis());
+            contentProvider.update(FTContentProvider.getUriViewData(), values, null, null);
+            values.remove(FTSQL.RUM_DATA_UPDATE_TIME);
+            contentProvider.update(FTContentProvider.getUriActionData(), values, null, null);
         } catch (Exception e) {
             LogUtils.d(TAG, LogUtils.getStackTraceString(e));
         }
@@ -940,11 +764,11 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
     }
 
     public List<SyncData> queryDataByDataByTypeLimit(int limit, DataType dataType) {
-        return queryDataByDescLimit(limit, FTSQL.RECORD_COLUMN_DATA_TYPE + "=? ", new String[]{dataType.getValue()}, "asc", false);
+        return queryDataByDescLimit(limit, ProviderSql.BY_TYPE, new String[]{dataType.getValue()}, "asc", false);
     }
 
     public List<SyncData> queryDataByDataByTypeLimitDesc(int limit, DataType dataType) {
-        return queryDataByDescLimit(limit, FTSQL.RECORD_COLUMN_DATA_TYPE + "=? ", new String[]{dataType.getValue()}, "desc", false);
+        return queryDataByDescLimit(limit, ProviderSql.BY_TYPE, new String[]{dataType.getValue()}, "desc", false);
     }
 
     /**
@@ -983,7 +807,7 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
 
             // Since rawQuery returns a Bundle, we need to get data through other methods
             // Here we directly use ContentProvider's query method
-            String selection = FTSQL.RECORD_COLUMN_DATA_TYPE + "=? AND " + FTSQL.RECORD_COLUMN_TM + "<=?";
+            String selection = ProviderSql.ERROR_SAMPLED;
             String[] selectionArgs = {originType, String.valueOf(errorDateline)};
 
             Cursor cursor = contentProvider.query(uri, null, selection, selectionArgs, null);
@@ -1022,10 +846,8 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
         try {
             // Use ContentProvider to delete data
             long expireTimeline = now - expireDuration;
-            String selection = FTSQL.RECORD_COLUMN_DATA_TYPE + "='" + dataType.getValue() + "' AND "
-                    + FTSQL.RECORD_COLUMN_TM + "< " + expireTimeline;
-
-            count = contentProvider.delete(FTContentProvider.getUriSyncDataFlat(), selection, null);
+            count = contentProvider.delete(FTContentProvider.getUriSyncDataFlat(), ProviderSql.EXPIRED,
+                    new String[]{dataType.getValue(), String.valueOf(expireTimeline)});
             DiagnosticsBridge.record("storage_remove", dataType.getValue(), count, -1, "expired");
             if (count > 0) {
                 LogUtils.d(TAG, "deleteExpireCache executed successfully via ContentProvider, deleted: " + count);
@@ -1049,13 +871,14 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
         int count = 0;
 
         try {
-            String where = getDataTypeWhereString(list);
+            String[] types = typeValues(list);
+            String where = types == null ? null : ProviderSql.byTypes(types.length);
             Uri uri = FTContentProvider.getUriSyncDataFlat();
             LogUtils.d(TAG, "queryTotalCount:" + uri + "," + where);
             Cursor cursor = contentProvider.query(uri,
-                    new String[]{"COUNT(*)"},
+                    new String[]{ProviderSql.COUNT},
                     where,
-                    null,
+                    types,
                     null);
             if (cursor != null && cursor.moveToFirst()) {
                 count = cursor.getInt(0);
@@ -1070,18 +893,13 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
         return count;
     }
 
-    private String getDataTypeWhereString(DataType[] list) {
-        if (list == null || list.length == 0) {
-            return null;
-        }
-        StringBuilder where = new StringBuilder();
+    private String[] typeValues(DataType[] list) {
+        if (list == null || list.length == 0) return null;
+        String[] types = new String[list.length];
         for (int i = 0; i < list.length; i++) {
-            where.append(FTSQL.RECORD_COLUMN_DATA_TYPE + "='").append(list[i].getValue()).append("'");
-            if (i < list.length - 1) {
-                where.append(" OR ");
-            }
+            types[i] = list[i].getValue();
         }
-        return where.toString();
+        return types;
     }
 
     /**
@@ -1097,16 +915,14 @@ public class FTDBManager extends DBManager implements FTDataStore, HistoricalRum
 
     public void deleteOldestData(DataType[] list, final int limit) {
         try {
-            // Use ContentProvider's call method to execute execSQL
-            String where = getDataTypeWhereString(list);
-            String sql = "DELETE FROM " + FTSQL.FT_SYNC_DATA_FLAT_TABLE_NAME + " where _id in (SELECT _id from "
-                    + FTSQL.FT_SYNC_DATA_FLAT_TABLE_NAME + " where " + where + " ORDER by tm ASC LIMIT " + limit + ")";
-
+            String[] types = typeValues(list);
+            if (types == null) return;
             Bundle extras = new Bundle();
-            extras.putString("sql", sql);
-
-            Bundle result = contentProvider.call(FTContentProvider.getUriSyncDataFlat(), FTContentProvider.METHOD_EXEC_SQL, null, extras);
-            if (result.getBoolean("success")) {
+            extras.putStringArray(FTSQL.RECORD_COLUMN_DATA_TYPE, types);
+            extras.putInt("limit", limit);
+            Bundle result = contentProvider.call(FTContentProvider.getUriSyncDataFlat(),
+                    FTContentProvider.METHOD_DELETE_OLDEST, null, extras);
+            if (result != null && result.getBoolean("success")) {
                 DiagnosticsBridge.record("storage_remove", list != null && list.length == 1 ? list[0].getValue() : "other", -1, -1, "capacity_cleanup_count_unavailable");
 
                 if (FTDBCachePolicy.get().isLimitWithCacheSize()

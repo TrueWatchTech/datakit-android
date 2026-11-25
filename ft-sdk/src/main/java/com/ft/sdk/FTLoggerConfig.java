@@ -160,7 +160,7 @@ public class FTLoggerConfig {
     }
 
     /**
-     * Set whether to enable control log capture
+     * Enables collection of Android console logs instrumented by the Gradle plugin. Disabled by default.
      *
      * @param enableConsoleLog true to capture console logs
      * @return this config for chaining
@@ -171,8 +171,10 @@ public class FTLoggerConfig {
     }
 
     /**
-     * @param enableConsoleLog Whether to enable control log capture
-     * @param prefix           Log filter prefix
+     * Enables instrumented console log collection for messages matching a prefix.
+     *
+     * @param enableConsoleLog true to collect matching console logs
+     * @param prefix case-sensitive prefix of the message text; null accepts any prefix
      * @return this config for chaining
      */
     public FTLoggerConfig setEnableConsoleLog(boolean enableConsoleLog, String prefix) {
@@ -245,7 +247,8 @@ public class FTLoggerConfig {
     }
 
     /**
-     * Set database data storage strategy
+     * Sets the log eviction policy at the row-count limit (default {@link LogCacheDiscard#DISCARD}).
+     * Total cache-size mode uses {@link FTSDKConfig#setCacheDiscard(CacheDiscard)} instead.
      *
      * @param logCacheDiscardStrategy strategy used when the log cache limit is reached
      * @return this config for chaining
@@ -257,7 +260,7 @@ public class FTLoggerConfig {
 
 
     /**
-     * Set log level filter
+     * Selects the log statuses eligible for collection. An empty array allows all statuses.
      *
      * @param logLevelFilters allowed log statuses
      * @return this config for chaining
@@ -272,7 +275,7 @@ public class FTLoggerConfig {
     }
 
     /**
-     * Set log level filter
+     * Selects the log statuses eligible for collection. An empty array allows all statuses.
      *
      * @param logLevelFilters allowed custom log status strings
      * @return this config for chaining
@@ -292,9 +295,11 @@ public class FTLoggerConfig {
     }
 
     /**
-     * Set whether to print custom logs to console
+     * Mirrors single-entry {@link FTLogger} calls to the console before upload status filtering.
+     * Requires custom logging. An installed inner log handler suppresses this output.
      *
-     * @param printCustomLogToConsole true to print custom logs to console
+     * @param printCustomLogToConsole true to enable mirroring (default false)
+     * @return this config for chaining
      */
     public FTLoggerConfig setPrintCustomLogToConsole(boolean printCustomLogToConsole) {
         this.printCustomLogToConsole = printCustomLogToConsole;
@@ -339,7 +344,7 @@ public class FTLoggerConfig {
      * Check if log level is set
      *
      * @param status log status to check
-     * @return Whether to set
+     * @return true when the status passes the configured filter
      */
     public boolean checkLogLevel(String status) {
         return logLevelFilters == null

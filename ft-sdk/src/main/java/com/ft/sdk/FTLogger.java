@@ -12,7 +12,9 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Print logs that can be viewed in TrueWatch Studio
+ * Submits custom logs after {@link FTSdk#initLogWithConfig(FTLoggerConfig)}.
+ * Enable {@link FTLoggerConfig#setEnableCustomLog(boolean)} to accept entries.
+ * Status filtering applies to both single-entry and batch submissions.
  *
  * @author Brandon
  */
@@ -45,7 +47,7 @@ public class FTLogger {
     }
 
     /**
-     * Store a single log entry locally and synchronize
+     * Queues one custom log entry for local storage and subsequent upload.
      *
      * @param content Log content, maximum limit {@link com.ft.sdk.garble.bean.BaseContentBean#LIMIT_SIZE}
      * @param status  Log level
@@ -56,18 +58,18 @@ public class FTLogger {
     }
 
     /**
-     * Store a single log entry locally and synchronize
+     * Queues one custom log entry for local storage and subsequent upload.
      *
      * @param content   Log content, maximum limit {@link com.ft.sdk.garble.bean.BaseContentBean#LIMIT_SIZE}
      * @param status    Log level
-     * @param isSilence Whether silent
+     * @param isSilence true to skip the sync trigger after writing the batch to the local cache
      */
     public void logBackground(String content, Status status, boolean isSilence) {
         logBackground(content, status.name, null, isSilence);
     }
 
     /**
-     * Store a single log entry locally and synchronize
+     * Queues one custom log entry for local storage and subsequent upload.
      *
      * @param content  Log content, maximum limit {@link com.ft.sdk.garble.bean.BaseContentBean#LIMIT_SIZE}
      * @param status   Log level
@@ -78,12 +80,12 @@ public class FTLogger {
     }
 
     /**
-     * Store a single log entry locally and synchronize
+     * Queues one custom log entry for local storage and subsequent upload.
      *
      * @param content   Log content, maximum limit {@link com.ft.sdk.garble.bean.BaseContentBean#LIMIT_SIZE}
      * @param status    Log level
      * @param property  Additional properties
-     * @param isSilence Whether silent
+     * @param isSilence true to skip the sync trigger after writing the batch to the local cache
      */
     public void logBackground(String content, Status status, HashMap<String, Object> property, boolean isSilence) {
         logBackground(content, status.name, property, isSilence);
@@ -100,10 +102,11 @@ public class FTLogger {
     }
 
     /**
-     * Store a single log entry locally and synchronize
+     * Queues one custom log entry for local storage and subsequent upload.
      *
      * @param content Log content, maximum limit {@link com.ft.sdk.garble.bean.BaseContentBean#LIMIT_SIZE}
      * @param status   Log level
+     * @param isSilence true to skip the sync trigger after writing the batch to the local cache
      */
     public void logBackground(String content, String status, boolean isSilence) {
         logBackground(content, status, null, isSilence);
@@ -121,12 +124,12 @@ public class FTLogger {
     }
 
     /**
-     * Store a single log entry locally and synchronize
+     * Queues one custom log entry for local storage and subsequent upload.
      *
      * @param content   Log content, maximum limit {@link com.ft.sdk.garble.bean.BaseContentBean#LIMIT_SIZE}
      * @param status    Custom status
      * @param property  Additional properties
-     * @param isSilence Whether silent
+     * @param isSilence true to skip the sync trigger after writing the batch to the local cache
      */
     public void logBackground(String content, String status, HashMap<String, Object> property, boolean isSilence) {
 
