@@ -537,11 +537,21 @@ public class FTRUMInnerManager {
         return actionBean == null ? null : actionBean.getId();
     }
 
+    void addDiscreteAction(String actionName, String actionType, long duration, HashMap<String, Object> property) {
+        long eventTime = Utils.getCurrentNanoTime();
+        recordCompletedAction(actionName, actionType, duration, eventTime, property, appStateHistory().at(eventTime));
+    }
+
     void addAction(String actionName, String actionType, long duration, long startTime) {
         addAction(actionName, actionType, duration, startTime, null);
     }
 
     void addAction(String actionName, String actionType, long duration, long startTime, HashMap<String, Object> property) {
+        recordCompletedAction(actionName, actionType, duration, startTime, property, appStateHistory().during(startTime, duration));
+    }
+
+    private void recordCompletedAction(String actionName, String actionType, long duration, long startTime,
+                                       HashMap<String, Object> property, String appState) {
         long interactionTime = System.nanoTime();
         checkSessionRefresh(true);
         RUMViewContext viewContext = resolveActionRUMViewContext(actionType, startTime, duration);
@@ -561,7 +571,7 @@ public class FTRUMInnerManager {
             RUMCustomKeys.putUserProperties(activeAction.getProperty(), property);
         }
         activeAction.setCollectType(checkSessionWillCollect(activeAction.getSessionId()));
-        activeAction.frozenAppState = appStateHistory().during(startTime, duration);
+        activeAction.frozenAppState = appState;
         initAction(activeAction, true);
         if (isLaunchActionType(actionType)) {
             closeLaunchViewIfForegroundViewIsActive(duration);

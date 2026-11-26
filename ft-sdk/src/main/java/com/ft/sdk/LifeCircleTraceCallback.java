@@ -201,6 +201,10 @@ class LifeCircleTraceCallback {
     }
 
     private void expireWarmStartIfNeeded() {
+        // Expire stale candidates so a later Activity can be classified independently.
+        // If the first draw completes the active candidate after 60 seconds, report its full
+        // duration. The Studio viewer keeps the raw event. Only the analytics dashboard
+        // filters out warm starts longer than 60 seconds.
         if (warmStartClockTimeNano > 0
                 && System.nanoTime() - warmStartClockTimeNano > WARM_START_CANDIDATE_TIMEOUT_NS) {
             clearWarmStart();

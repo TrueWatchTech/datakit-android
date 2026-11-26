@@ -1,3 +1,9 @@
+# agent 1.7.7-beta03
+
+1. Manual `addAction` records the foreground/background state at the time of the call, including when a duration is supplied.
+2. Manual `addError(log, message, errorType)` records the current process state at the time of the call. Overloads with an explicit `AppState` use the supplied value.
+
+---
 # agent 1.7.7-beta02
 
 1. On Android 8.0 and later, CPU usage sampling now closes the output stream from `top` after each sample, including when reading fails.

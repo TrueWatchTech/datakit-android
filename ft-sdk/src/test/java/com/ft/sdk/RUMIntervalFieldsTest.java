@@ -391,6 +391,23 @@ public class RUMIntervalFieldsTest {
         assertEquals("foreground", rum.viewAppState(view, 300));
     }
 
+    @Test public void publicAddActionUsesCallStateAndPreservesReportedDuration() throws Exception {
+        FTRUMGlobalManager api = new FTRUMGlobalManager();
+        replace(FTRUMGlobalManager.class, api, "innerManager", rum);
+        long now = Utils.getCurrentNanoTime();
+        long duration = TimeUnit.SECONDS.toNanos(7);
+        advanceTo(now - TimeUnit.SECONDS.toNanos(1));
+        history.record("background");
+        // Keep the call inside known background history, with its putative end in the future.
+        advanceTo(now + TimeUnit.SECONDS.toNanos(1));
+        api.addAction("background sample", "custom", duration);
+        Runnable write = queuedEvents.get(queuedEvents.size() - 1);
+        history.record("foreground");
+        write.run();
+        assertEquals("background", fields.get("action").get("app_state"));
+        assertEquals(duration, fields.get("action").get("duration"));
+    }
+
     @Test public void completedActionFreezesIntervalBeforeDelayedSerialization() throws Exception {
         rum.startView("screen");
         advanceTo(200);
@@ -582,6 +599,29 @@ public class RUMIntervalFieldsTest {
         assertEquals(Constants.VIEW_NAME_APPLICATION_LAUNCH,
                 tags.get("error").get(Constants.KEY_RUM_VIEW_NAME));
         assertEquals("startup", tags.get("error").get(Constants.KEY_RUM_ERROR_SITUATION));
+    }
+
+    @Test public void manualErrorCapturesProcessStateAtCallTime() throws Exception {
+        FTRUMGlobalManager api = new FTRUMGlobalManager();
+        replace(FTRUMGlobalManager.class, api, "innerManager", rum);
+        FTActivityManager activities = FTActivityManager.get();
+        runQueuedEvents(() -> {
+            api.addError("stack", "startup", "custom");
+            activities.appForeground();
+        });
+        assertEquals("startup", tags.get("error").get(Constants.KEY_RUM_ERROR_SITUATION));
+        runQueuedEvents(() -> {
+            api.addError("stack", "foreground", "custom");
+            activities.appBackGround();
+        });
+        assertEquals("run", tags.get("error").get(Constants.KEY_RUM_ERROR_SITUATION));
+        runQueuedEvents(() -> {
+            api.addError("stack", "background", "custom");
+            activities.appForeground();
+        });
+        assertEquals("background", tags.get("error").get(Constants.KEY_RUM_ERROR_SITUATION));
+        runQueuedEvents(() -> api.addError("stack", "explicit", "custom", AppState.UNKNOWN));
+        assertEquals("unknown", tags.get("error").get(Constants.KEY_RUM_ERROR_SITUATION));
     }
 
     @Test public void backgroundPolicyDoesNotDropManualErrorsOrNativeAnrs() throws Exception {

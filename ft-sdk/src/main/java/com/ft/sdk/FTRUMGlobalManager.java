@@ -38,12 +38,12 @@ public class FTRUMGlobalManager {
      *
      * @param actionName action name
      * @param actionType action type
-     * @param duration   action duration in nanoseconds
+     * @param duration   reported duration in nanoseconds; app_state is sampled at the time of this call
      * @param property   extended attributes
      */
     public void addAction(String actionName, String actionType, long duration, HashMap<String, Object> property) {
         if (innerManager != null) {
-            innerManager.addAction(actionName, actionType, duration, Utils.getCurrentNanoTime(), property);
+            innerManager.addDiscreteAction(actionName, actionType, duration, property);
         }
     }
 
@@ -54,9 +54,7 @@ public class FTRUMGlobalManager {
      * @param actionType action type
      */
     public void addAction(String actionName, String actionType) {
-        if (innerManager != null) {
-            innerManager.addAction(actionName, actionType, 0, Utils.getCurrentNanoTime(), null);
-        }
+        addAction(actionName, actionType, 0, null);
     }
 
     /**
@@ -67,9 +65,7 @@ public class FTRUMGlobalManager {
      * @param property   extended attributes
      */
     public void addAction(String actionName, String actionType, HashMap<String, Object> property) {
-        if (innerManager != null) {
-            innerManager.addAction(actionName, actionType, 0, Utils.getCurrentNanoTime(), property);
-        }
+        addAction(actionName, actionType, 0, property);
     }
 
     /**
@@ -77,12 +73,10 @@ public class FTRUMGlobalManager {
      *
      * @param actionName action name
      * @param actionType action type
-     * @param duration   action duration in nanoseconds
+     * @param duration   reported duration in nanoseconds; app_state is sampled at the time of this call
      */
     public void addAction(String actionName, String actionType, long duration) {
-        if (innerManager != null) {
-            innerManager.addAction(actionName, actionType, duration, Utils.getCurrentNanoTime(), null);
-        }
+        addAction(actionName, actionType, duration, null);
     }
 
     /**
@@ -273,7 +267,7 @@ public class FTRUMGlobalManager {
     }
 
     /**
-     * Add error information, default AppState.RUN
+     * Records an error with the current process state at the time of this call.
      *
      * @param log       error stack or diagnostic details
      * @param message   short error message
@@ -281,7 +275,7 @@ public class FTRUMGlobalManager {
      */
     public void addError(String log, String message, String errorType) {
         if (innerManager != null) {
-            innerManager.addError(log, message, errorType, AppState.RUN);
+            innerManager.addError(log, message, errorType, FTActivityManager.get().getAppState());
         }
     }
 
