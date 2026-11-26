@@ -1,3 +1,10 @@
+# native 1.1.5-beta02
+
+1. Fixed native crash stack unwinding across supported ABIs by reading the address width declared in DWARF frame tables and applying inherited unwind rules to frames with no instructions of their own.
+2. Fixed truncated arm64 backtraces in functions that use signed return addresses.
+
+---
+
 # native 1.1.5-beta01
 
 1. Added a separate cache directory for reusable crash-report reserves. Completed reports and in-progress ANR traces stay in the existing files directory. Older Agent versions continue to use the single-directory layout.
