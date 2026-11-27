@@ -1,3 +1,13 @@
+# agent 1.7.7
+
+1. Added warm-start Actions (`launch_warm`) for delayed first Activities and foreground returns that create an Activity. Returning to an existing Activity retains hot-start tracking. Restored automatic cold-start tracking on Android 5–9 and improved foreground/background classification before the first draw.
+2. Launch Actions, RUM state and automatic LongTask and watchdog ANR filters use the current process lifecycle. Background-origin stalls are filtered. Manual Actions and implicit-state Errors use the state at the time of the call. Explicit Error states are preserved. Crash and ANR reporting now uses occurrence-time evidence where available.
+3. Completed event-level RUM `custom_keys` across native, WebView and cache recovery paths. Conflicting concurrent global-context updates preserve previously accepted fields.
+4. Fixed Activity resume and upload scheduling delays during network requests and retries. Restricted the internal SQLite provider to SDK operations and bound parameters for queue updates and cleanup.
+5. Fixed lifecycle callback cleanup and foreground tracking after SDK shutdown and reinstall. Reduced background checks and watchdog wakeups, and closed file handles and process streams used for CPU, memory and process-start sampling.
+6. Default SDK debug logs now use `cacheDir/ft_sdk/logs/`. With Native 1.1.5, reusable crash-report reserves use the cache directory. Existing reports remain available for recovery across upgrades and rollbacks.
+
+---
 # agent 1.7.7-beta03
 
 1. Manual `addAction` records the foreground/background state at the time of the call, including when a duration is supplied.
